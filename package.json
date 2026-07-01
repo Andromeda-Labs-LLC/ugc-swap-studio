@@ -1,0 +1,57 @@
+{
+  "name": "ugc-swap-studio",
+  "version": "0.1.0",
+  "description": "Self-hosted AI UGC face-swap workflow studio for internal marketing teams.",
+  "author": "Andromeda Labs LLC",
+  "license": "MIT",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "electron:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
+    "build": "tsc -b && vite build",
+    "app:dir": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
+    "app:dist": "npm run build && electron-builder --mac",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "lucide-react": "^1.23.0",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "studio.andromedalabs.ugcswapstudio",
+    "productName": "UGC Swap Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "README.md",
+      "docs/**/*",
+      "models/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}
