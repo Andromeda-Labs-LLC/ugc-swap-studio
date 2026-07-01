@@ -1,7 +1,7 @@
 {
   "name": "ugc-swap-studio",
   "version": "0.1.0",
-  "description": "Self-hosted AI UGC face-swap workflow studio for internal marketing teams.",
+  "description": "Self-hosted AI UGC source-post cloning workflow studio for internal marketing teams.",
   "author": "Andromeda Labs LLC",
   "license": "MIT",
   "type": "module",
@@ -34,8 +34,8 @@
     "wait-on": "^9.0.10"
   },
   "build": {
-    "appId": "studio.andromedalabs.ugcswapstudio",
-    "productName": "UGC Swap Studio",
+    "appId": "studio.andromedalabs.copytok",
+    "productName": "CopyTok",
     "directories": {
       "output": "release"
     },
@@ -49,6 +49,7 @@
     ],
     "mac": {
       "category": "public.app-category.video",
+      "icon": "build/icon.icns",
       "target": [
         "dir"
       ]

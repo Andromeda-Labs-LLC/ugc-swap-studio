@@ -1,11 +1,12 @@
 # Moderation And Disclosure
 
-UGC Swap Studio should make safe behavior the default.
+CopyTok should make safe behavior the default.
 
 ## Required Checks Before Rendering
 
 - The reference face is owned, generated, licensed, or consented.
 - The source video is owned, licensed, or approved for derivative use.
+- Any transcript, audio, voice, or gesture reference from a source link is owned, licensed, or explicitly permitted.
 - The export is prepared for AI disclosure/provenance metadata.
 
 ## Disallowed Use
@@ -14,6 +15,7 @@ UGC Swap Studio should make safe behavior the default.
 - False endorsements.
 - Public-figure likeness use without rights.
 - Private-person likeness use without consent.
+- Voice cloning, voice imitation, or retained source audio without permission.
 - Attempts to bypass platform synthetic-media labels.
 - Uploading or processing sensitive private media without permission.
 
@@ -28,4 +30,6 @@ Exports should support:
 
 ## URL Import
 
-URL import should remain disabled by default. Upload-first behavior is safer because it forces the team to work from files they own, licensed assets, or approved source clips.
+URL import is allowed only as a rights-gated source-analysis step. A pasted link should be analyzed before rendering so the job manifest can record the post title, platform, URL, caption/transcript status, audio detection, and consent warning.
+
+The analyzer should not be treated as permission to copy a third-party post. It is a preparation step for owned, licensed, or otherwise permitted references.

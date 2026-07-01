@@ -43,6 +43,16 @@ export interface ComplianceState {
   aiDisclosure: boolean
 }
 
+export interface SourceReferenceSummary {
+  title: string
+  platform: string
+  url: string
+  durationSeconds: number | null
+  transcriptStatus: string
+  transcriptLines: number
+  voiceStatus: string
+}
+
 export interface RenderJob {
   id: string
   title: string
@@ -53,6 +63,7 @@ export interface RenderJob {
   updatedAt: string
   referenceFace: string
   sourceVideo: string
+  sourceReference?: SourceReferenceSummary
   preset: RenderPreset
   compliance: ComplianceState
   audit: string[]
@@ -149,6 +160,7 @@ export function createMockRenderJob(input: {
   providerId: ProviderId
   referenceFace: string
   sourceVideo: string
+  sourceReference?: SourceReferenceSummary
   preset: RenderPreset
   compliance: ComplianceState
 }): RenderJob {
@@ -163,12 +175,16 @@ export function createMockRenderJob(input: {
     updatedAt: timestamp,
     referenceFace: input.referenceFace,
     sourceVideo: input.sourceVideo,
+    sourceReference: input.sourceReference,
     preset: input.preset,
     compliance: input.compliance,
     audit: [
       'Job created in local queue.',
       `Provider route selected: ${providerOptions.find((provider) => provider.id === input.providerId)?.name ?? input.providerId}.`,
       `Export preset: ${input.preset.resolution}.`,
+      input.sourceReference
+        ? `Source link analyzed: ${input.sourceReference.platform}, ${input.sourceReference.transcriptLines} transcript lines.`
+        : 'Source came from a local file or unanalyzed placeholder.',
       input.preset.provenance ? 'Provenance manifest requested.' : 'Provenance manifest disabled.',
     ],
   }
@@ -205,7 +221,7 @@ export function advanceJob(job: RenderJob): RenderJob {
 
 export function downloadManifest(job: RenderJob) {
   const payload = {
-    app: 'UGC Swap Studio',
+    app: 'CopyTok',
     generatedAt: new Date().toISOString(),
     note: 'This is a provider-neutral mock render manifest. Replace the mock provider with a real adapter to generate video artifacts.',
     job,

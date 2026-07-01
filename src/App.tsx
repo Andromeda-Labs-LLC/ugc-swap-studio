@@ -1,23 +1,27 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ArrowDownToLine,
   CheckCircle2,
   CircleAlert,
   Clock3,
-  FileVideo,
+  ExternalLink,
+  FileText,
   FolderKanban,
-  Gauge,
+  HelpCircle,
   Image,
-  Layers3,
   Link,
+  List,
+  Mic2,
   Play,
-  Plus,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Sparkles,
-  Upload,
+  UploadCloud,
+  User,
   WandSparkles,
 } from 'lucide-react'
+import appIcon from './assets/app-icon.png'
 import './App.css'
 import {
   advanceJob,
@@ -25,27 +29,19 @@ import {
   downloadManifest,
   providerOptions,
   starterJobs,
-  workflowStats,
   type ComplianceState,
   type ProviderId,
   type RenderJob,
   type RenderPreset,
+  type SourceReferenceSummary,
 } from './domain'
-
-const navItems = [
-  { label: 'Projects', icon: FolderKanban },
-  { label: 'Face Library', icon: Image },
-  { label: 'Source Videos', icon: FileVideo },
-  { label: 'Render Queue', icon: Layers3 },
-  { label: 'Settings', icon: Settings },
-]
 
 const defaultPreset: RenderPreset = {
   resolution: '720p',
   watermark: false,
   provenance: true,
   faceRestore: true,
-  urlImport: false,
+  urlImport: true,
 }
 
 const defaultCompliance: ComplianceState = {
@@ -54,17 +50,25 @@ const defaultCompliance: ComplianceState = {
   aiDisclosure: true,
 }
 
+const navItems = [
+  { label: 'Projects', icon: FolderKanban },
+  { label: 'Queue', icon: List },
+  { label: 'Settings', icon: Settings },
+]
+
 function App() {
   const [activeNav, setActiveNav] = useState('Projects')
   const [providerId, setProviderId] = useState<ProviderId>('mock-local')
   const [preset, setPreset] = useState<RenderPreset>(defaultPreset)
   const [compliance, setCompliance] = useState<ComplianceState>(defaultCompliance)
   const [jobs, setJobs] = useState<RenderJob[]>(starterJobs)
-  const [referenceFace, setReferenceFace] = useState('owned-avatar-selfie.jpg')
-  const [sourceVideo, setSourceVideo] = useState('ugc-hook-template.mp4')
+  const [referenceFace, setReferenceFace] = useState('')
+  const [sourceVideo, setSourceVideo] = useState('')
   const [referencePreview, setReferencePreview] = useState<string | null>(null)
   const [sourcePreview, setSourcePreview] = useState<string | null>(null)
   const [sourceUrl, setSourceUrl] = useState('')
+  const [sourceAnalysis, setSourceAnalysis] = useState<SourceLinkAnalysis | null>(null)
+  const [isAnalyzingSource, setIsAnalyzingSource] = useState(false)
   const [hostInfo, setHostInfo] = useState<StudioHostInfo | null>(null)
 
   useEffect(() => {
@@ -84,9 +88,11 @@ function App() {
     [providerId],
   )
 
+  const activeJob = jobs[0]
+  const sourceLabel = sourceVideo || sourceAnalysis?.title || sourceUrl
   const readyToRender =
     Boolean(referenceFace) &&
-    Boolean(sourceVideo || sourceUrl) &&
+    Boolean(sourceVideo || (sourceUrl && sourceAnalysis?.ok)) &&
     compliance.faceConsent &&
     compliance.sourceRights &&
     compliance.aiDisclosure
@@ -106,10 +112,53 @@ function App() {
     if (!file) return
     setSourceVideo(file.name)
     setSourceUrl('')
+    setSourceAnalysis(null)
     setSourcePreview((existingPreview) => {
       if (existingPreview) URL.revokeObjectURL(existingPreview)
       return URL.createObjectURL(file)
     })
+  }
+
+  function generateAvatarStub() {
+    setReferenceFace('generated-avatar-reference.png')
+    setReferencePreview(null)
+  }
+
+  function handleSourceUrlChange(value: string) {
+    setSourceUrl(value)
+    setSourceAnalysis(null)
+    if (value) setSourceVideo('')
+  }
+
+  async function analyzeSourceLink() {
+    if (!sourceUrl.trim() || !window.studioHost?.analyzeSourceUrl) return
+    setIsAnalyzingSource(true)
+    setSourceAnalysis(null)
+    try {
+      const analysis = await window.studioHost.analyzeSourceUrl(sourceUrl.trim())
+      setSourceAnalysis(analysis)
+    } catch (error) {
+      setSourceAnalysis({
+        ok: false,
+        fetchedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsAnalyzingSource(false)
+    }
+  }
+
+  function sourceReferenceSummary(): SourceReferenceSummary | undefined {
+    if (!sourceAnalysis?.ok) return undefined
+    return {
+      title: sourceAnalysis.title ?? 'Analyzed source post',
+      platform: sourceAnalysis.platform ?? 'Unknown platform',
+      url: sourceAnalysis.url ?? sourceUrl,
+      durationSeconds: sourceAnalysis.durationSeconds ?? null,
+      transcriptStatus: sourceAnalysis.transcript?.status ?? 'missing',
+      transcriptLines: sourceAnalysis.transcript?.lineCount ?? 0,
+      voiceStatus: sourceAnalysis.voice?.status ?? 'Audio status unknown.',
+    }
   }
 
   function startRenderJob() {
@@ -117,354 +166,356 @@ function App() {
     const job = createMockRenderJob({
       providerId,
       referenceFace,
-      sourceVideo: sourceUrl || sourceVideo,
+      sourceVideo: sourceLabel,
+      sourceReference: sourceReferenceSummary(),
       preset,
       compliance,
     })
     setJobs((currentJobs) => [job, ...currentJobs])
   }
 
-  const activeJob = jobs[0]
-
   return (
     <main className="studio-shell">
-      <aside className="sidebar">
+      <header className="app-header">
         <div className="brand">
-          <div className="brand-mark">
-            <WandSparkles size={21} />
-          </div>
-          <div>
-            <strong>UGC Swap Studio</strong>
-            <span>Local creator ops</span>
-          </div>
+          <img src={appIcon} alt="" />
+          <strong>CopyTok</strong>
         </div>
-
-        <nav aria-label="Studio sections">
+        <nav aria-label="Studio navigation">
           {navItems.map((item) => {
             const Icon = item.icon
             return (
               <button
                 key={item.label}
-                className={activeNav === item.label ? 'nav-item active' : 'nav-item'}
+                className={activeNav === item.label ? 'active' : ''}
                 type="button"
                 onClick={() => setActiveNav(item.label)}
               >
-                <Icon size={18} />
-                <span>{item.label}</span>
+                <Icon size={17} />
+                {item.label}
               </button>
             )
           })}
         </nav>
-
-        <section className="sidebar-card">
-          <span className="section-label">Render routing</span>
-          <strong>{selectedProvider.name}</strong>
-          <p>{selectedProvider.bestFor}</p>
-        </section>
-
-        <section className="host-card">
-          <span>Workspace</span>
-          <strong>{hostInfo?.packaged ? 'Packaged app' : 'Development build'}</strong>
-          <small>{hostInfo?.userDataPath ?? 'Electron host pending'}</small>
-        </section>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <h1>Generate AI UGC swaps</h1>
-            <p>Upload an owned face, attach an owned source clip, route the job, and export with disclosure metadata.</p>
-          </div>
-          <button className="secondary-action" type="button">
-            <Plus size={18} />
-            New project
+        <div className="header-actions">
+          <button type="button" aria-label="Help">
+            <HelpCircle size={18} />
           </button>
-        </header>
+          <button type="button" aria-label="Account">
+            <User size={18} />
+          </button>
+        </div>
+      </header>
 
-        <section className="stat-row" aria-label="Workflow status">
-          {workflowStats.map((stat) => {
-            const Icon = stat.icon
-            return (
-              <article className="stat" key={stat.label}>
-                <Icon size={18} />
-                <span>{stat.label}</span>
-                <strong>{stat.value}</strong>
-              </article>
-            )
-          })}
-        </section>
+      <section className="hero-flow">
+        <p className="micro-label">Local AI UGC workflow</p>
+        <h1>Any avatar. Any action template.</h1>
+        <p className="hero-copy">
+          Generate a persona, fetch a permitted source post, and route the action clone through your chosen engine.
+        </p>
 
-        <section className="composer-grid">
-          <div className="composer-main">
-            <section className="panel">
-              <PanelHeading
-                icon={<Upload size={19} />}
-                label="Inputs"
-                title="Reference face and source video"
-                detail="Keep v1 narrow: one face, one short video, one render."
-              />
-              <div className="upload-grid">
-                <UploadTile
-                  title="Reference face"
-                  description="Owned avatar, founder clip, licensed creator, or consented talent."
-                  accept="image/*"
-                  fileName={referenceFace}
-                  preview={referencePreview}
-                  icon={<Image size={24} />}
-                  onFile={handleReferenceUpload}
-                />
-                <UploadTile
-                  title="Source video"
-                  description="Upload-first by default. URL import stays gated for rights review."
-                  accept="video/mp4,video/quicktime,video/*"
-                  fileName={sourceVideo}
-                  preview={sourcePreview}
-                  icon={<FileVideo size={24} />}
-                  onFile={handleSourceUpload}
-                />
-              </div>
-
-              <div className="url-row">
-                <label htmlFor="source-url">
-                  <Link size={16} />
-                  Optional public URL
-                </label>
-                <input
-                  id="source-url"
-                  disabled={!preset.urlImport}
-                  value={sourceUrl}
-                  onChange={(event) => {
-                    setSourceUrl(event.target.value)
-                    if (event.target.value) setSourceVideo('')
-                  }}
-                  placeholder={preset.urlImport ? 'Paste licensed source URL' : 'Enable URL import in preset controls'}
-                />
-              </div>
-            </section>
-
-            <section className="panel">
-              <PanelHeading
-                icon={<ShieldCheck size={19} />}
-                label="Guardrails"
-                title="Rights and disclosure checks"
-                detail="Required before any provider can receive media."
-              />
-              <div className="check-list">
-                <CheckRow
-                  label="Reference face is owned, generated, licensed, or consented."
-                  checked={compliance.faceConsent}
-                  onChange={(value) => setCompliance((current) => ({ ...current, faceConsent: value }))}
-                />
-                <CheckRow
-                  label="Source video is owned, licensed, or approved for derivative use."
-                  checked={compliance.sourceRights}
-                  onChange={(value) => setCompliance((current) => ({ ...current, sourceRights: value }))}
-                />
-                <CheckRow
-                  label="Export should include AI disclosure/provenance metadata."
-                  checked={compliance.aiDisclosure}
-                  onChange={(value) => setCompliance((current) => ({ ...current, aiDisclosure: value }))}
-                />
-              </div>
-            </section>
-
-            <section className="panel">
-              <PanelHeading
-                icon={<Gauge size={19} />}
-                label="Preset"
-                title="Provider and export controls"
-                detail="All cloud integrations route through adapters, never UI code."
-              />
-              <div className="provider-grid">
-                {providerOptions.map((provider) => {
-                  const Icon = provider.icon
-                  return (
-                    <button
-                      key={provider.id}
-                      className={provider.id === providerId ? 'provider-card selected' : 'provider-card'}
-                      type="button"
-                      onClick={() => setProviderId(provider.id)}
-                    >
-                      <span className="provider-icon">
-                        <Icon size={18} />
-                      </span>
-                      <strong>{provider.shortName}</strong>
-                      <small>{provider.mode}</small>
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="control-grid">
-                <SegmentedControl
-                  label="Resolution"
-                  options={['720p', '1080p']}
-                  value={preset.resolution}
-                  onChange={(resolution) => setPreset((current) => ({ ...current, resolution }))}
-                />
-                <Toggle
-                  label="Watermark"
-                  checked={preset.watermark}
-                  onChange={(watermark) => setPreset((current) => ({ ...current, watermark }))}
-                />
-                <Toggle
-                  label="Provenance"
-                  checked={preset.provenance}
-                  onChange={(provenance) => setPreset((current) => ({ ...current, provenance }))}
-                />
-                <Toggle
-                  label="Face restore"
-                  checked={preset.faceRestore}
-                  onChange={(faceRestore) => setPreset((current) => ({ ...current, faceRestore }))}
-                />
-                <Toggle
-                  label="URL import"
-                  checked={preset.urlImport}
-                  onChange={(urlImport) => setPreset((current) => ({ ...current, urlImport }))}
-                />
-              </div>
-
-              <button
-                className="primary-action"
-                type="button"
-                disabled={!readyToRender}
-                onClick={startRenderJob}
-              >
-                <Sparkles size={19} />
-                Generate swap
+        <section className="swap-cards" aria-label="Swap inputs">
+          <UploadCard
+            accent="teal"
+            title="Avatar photo"
+            subtitle="Upload or generate the face you want in the video"
+            dropLabel="Drop image here"
+            dropMeta="PNG, JPG up to 20MB"
+            accept="image/*"
+            icon={<Image size={24} />}
+            fileName={referenceFace}
+            preview={referencePreview}
+            onFile={handleReferenceUpload}
+            footer={
+              <button className="ghost-button" type="button" onClick={generateAvatarStub}>
+                <WandSparkles size={15} />
+                Generate AI avatar
               </button>
-              {!readyToRender && (
-                <p className="blocked-note">
-                  <CircleAlert size={15} />
-                  Add inputs and complete all guardrail checks to enable rendering.
-                </p>
-              )}
-            </section>
+            }
+          />
+
+          <div className="swap-arrow" aria-hidden="true">
+            ⇄
           </div>
 
-          <aside className="queue-panel">
-            <PanelHeading
-              icon={<Clock3 size={19} />}
-              label="Queue"
-              title="Render jobs"
-              detail={`${jobs.length} job${jobs.length === 1 ? '' : 's'} in local history`}
-            />
-
-            {activeJob && (
-              <article className="active-job">
-                <div className="active-job-top">
-                  <div>
-                    <span className="pill">{activeJob.status}</span>
-                    <h2>{activeJob.title}</h2>
-                  </div>
-                  <strong>{activeJob.progress}%</strong>
-                </div>
-                <div className="progress-track">
-                  <div style={{ width: `${activeJob.progress}%` }} />
-                </div>
-                <div className="preview-frame">
-                  {sourcePreview ? (
-                    <video src={sourcePreview} muted controls />
-                  ) : (
-                    <div className="mock-preview">
-                      <Play size={30} />
-                      <span>{activeJob.status === 'complete' ? 'Mock output ready' : 'Renderer preview pending'}</span>
-                    </div>
-                  )}
-                </div>
+          <UploadCard
+            accent="violet"
+            title="Source video"
+            subtitle="Upload an acted-out template or analyze a permitted social link"
+            dropLabel="Drop video here"
+            dropMeta="MP4, MOV up to 500MB"
+            accept="video/mp4,video/quicktime,video/*"
+            icon={<Play size={24} />}
+            fileName={sourceVideo}
+            preview={sourcePreview}
+            onFile={handleSourceUpload}
+            footer={
+              <div className="link-input">
+                <span>OR PASTE LINK</span>
+                <label>
+                  <Link size={15} />
+                  <input
+                    value={sourceUrl}
+                    onChange={(event) => handleSourceUrlChange(event.target.value)}
+                    placeholder="TikTok, Instagram, YouTube Short, or source URL"
+                  />
+                </label>
                 <button
-                  className="download-action"
+                  className="analyze-button"
                   type="button"
-                  disabled={activeJob.status !== 'complete'}
-                  onClick={() => downloadManifest(activeJob)}
+                  disabled={!sourceUrl.trim() || isAnalyzingSource}
+                  onClick={analyzeSourceLink}
                 >
-                  <ArrowDownToLine size={17} />
-                  Download manifest
+                  <RefreshCw size={14} className={isAnalyzingSource ? 'spinning' : ''} />
+                  {isAnalyzingSource ? 'Fetching post' : 'Analyze link'}
                 </button>
-              </article>
-            )}
-
-            <div className="job-list">
-              {jobs.map((job) => (
-                <article className="job-row" key={job.id}>
-                  <div>
-                    <strong>{job.title}</strong>
-                    <span>{job.sourceVideo}</span>
-                  </div>
-                  <JobStatusIcon status={job.status} />
-                </article>
-              ))}
-            </div>
-
-            {activeJob && (
-              <section className="audit-box">
-                <span className="section-label">Latest audit</span>
-                <ul>
-                  {activeJob.audit.slice(-4).map((entry) => (
-                    <li key={entry}>{entry}</li>
-                  ))}
-                </ul>
-              </section>
-            )}
-          </aside>
+              </div>
+            }
+          />
         </section>
+
+        <SourceInsight analysis={sourceAnalysis} sourceUrl={sourceUrl} isAnalyzing={isAnalyzingSource} />
+
+        <section className="control-panel" aria-label="Render controls">
+          <div className="guardrail-block">
+            <strong>Rights & disclosure</strong>
+            <CheckRow
+              label="I own or have permission for the avatar image."
+              checked={compliance.faceConsent}
+              onChange={(value) => setCompliance((current) => ({ ...current, faceConsent: value }))}
+            />
+            <CheckRow
+              label="I own or have permission for the source action, transcript, audio, and voice reference."
+              checked={compliance.sourceRights}
+              onChange={(value) => setCompliance((current) => ({ ...current, sourceRights: value }))}
+            />
+            <CheckRow
+              label="I will disclose AI usage where appropriate."
+              checked={compliance.aiDisclosure}
+              onChange={(value) => setCompliance((current) => ({ ...current, aiDisclosure: value }))}
+            />
+          </div>
+
+          <div className="provider-block">
+            <label htmlFor="provider">Provider</label>
+            <select
+              id="provider"
+              value={providerId}
+              onChange={(event) => setProviderId(event.target.value as ProviderId)}
+            >
+              {providerOptions.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+            <small>{selectedProvider.bestFor}</small>
+          </div>
+
+          <div className="output-block">
+            <span>Output</span>
+            <SegmentedControl
+              options={['720p', '1080p']}
+              value={preset.resolution}
+              onChange={(resolution) => setPreset((current) => ({ ...current, resolution }))}
+            />
+            <label className="mini-toggle">
+              <input
+                type="checkbox"
+                checked={preset.provenance}
+                onChange={(event) =>
+                  setPreset((current) => ({ ...current, provenance: event.target.checked }))
+                }
+              />
+              Provenance
+            </label>
+          </div>
+
+          <button className="generate-button" type="button" disabled={!readyToRender} onClick={startRenderJob}>
+            <Sparkles size={18} />
+            Generate Swap
+          </button>
+          {!readyToRender && (
+            <p className="render-hint">
+              <CircleAlert size={15} />
+              Add an avatar, upload a video or analyze a link, and complete the checks.
+            </p>
+          )}
+        </section>
+
+        <QueuePanel job={activeJob} jobs={jobs} sourcePreview={sourcePreview} hostInfo={hostInfo} />
       </section>
     </main>
   )
 }
 
-function PanelHeading({
-  icon,
-  label,
+function UploadCard({
+  accent,
   title,
-  detail,
+  subtitle,
+  dropLabel,
+  dropMeta,
+  accept,
+  icon,
+  fileName,
+  preview,
+  onFile,
+  footer,
 }: {
-  icon: React.ReactNode
-  label: string
+  accent: 'teal' | 'violet'
   title: string
-  detail: string
+  subtitle: string
+  dropLabel: string
+  dropMeta: string
+  accept: string
+  icon: ReactNode
+  fileName: string
+  preview: string | null
+  onFile: (files: FileList | null) => void
+  footer: ReactNode
 }) {
   return (
-    <div className="panel-heading">
-      <div className="heading-icon">{icon}</div>
-      <div>
-        <span className="section-label">{label}</span>
-        <h2>{title}</h2>
-        <p>{detail}</p>
-      </div>
-    </div>
+    <article className={`upload-card ${accent}`}>
+      <div className="card-icon">{icon}</div>
+      <h2>{title}</h2>
+      <p>{subtitle}</p>
+      <label className={preview ? 'drop-zone has-preview' : 'drop-zone'}>
+        <input type="file" accept={accept} onChange={(event) => onFile(event.target.files)} />
+        {preview ? (
+          title === 'Source video' ? (
+            <video src={preview} muted />
+          ) : (
+            <img src={preview} alt="" />
+          )
+        ) : (
+          <>
+            <UploadCloud size={28} />
+            <strong>{dropLabel}</strong>
+            <span>{dropMeta}</span>
+          </>
+        )}
+      </label>
+      {fileName ? <span className="file-chip">{fileName}</span> : null}
+      {footer}
+    </article>
   )
 }
 
-function UploadTile({
-  title,
-  description,
-  accept,
-  fileName,
-  preview,
-  icon,
-  onFile,
+function SourceInsight({
+  analysis,
+  sourceUrl,
+  isAnalyzing,
 }: {
-  title: string
-  description: string
-  accept: string
-  fileName: string
-  preview: string | null
-  icon: React.ReactNode
-  onFile: (files: FileList | null) => void
+  analysis: SourceLinkAnalysis | null
+  sourceUrl: string
+  isAnalyzing: boolean
+}) {
+  if (!sourceUrl && !analysis && !isAnalyzing) return null
+
+  if (isAnalyzing) {
+    return (
+      <section className="source-insight pending" aria-live="polite">
+        <RefreshCw size={18} className="spinning" />
+        <div>
+          <strong>Fetching the source post</strong>
+          <span>CopyTok is checking the post, captions, audio track, timing, and adapter readiness.</span>
+        </div>
+      </section>
+    )
+  }
+
+  if (analysis && !analysis.ok) {
+    return (
+      <section className="source-insight warning" aria-live="polite">
+        <CircleAlert size={18} />
+        <div>
+          <strong>Source link could not be analyzed</strong>
+          <span>{analysis.message || analysis.installHint || 'Try another permitted post URL.'}</span>
+        </div>
+      </section>
+    )
+  }
+
+  if (!analysis?.ok) {
+    return (
+      <section className="source-insight neutral" aria-live="polite">
+        <Link size={18} />
+        <div>
+          <strong>Analyze the pasted source link</strong>
+          <span>Fetching is required before a URL can become a render-ready action template.</span>
+        </div>
+      </section>
+    )
+  }
+
+  const transcript = analysis.transcript
+  const transcriptReady = transcript?.status === 'ready'
+  const duration = formatDuration(analysis.durationSeconds)
+
+  return (
+    <section className="source-insight success" aria-label="Analyzed source post">
+      {analysis.thumbnail ? <img src={analysis.thumbnail} alt="" /> : <div className="source-thumb-fallback"><Play size={22} /></div>}
+      <div className="source-copy">
+        <span className="source-kicker">
+          <ShieldCheck size={14} />
+          Source fetched for reference
+        </span>
+        <strong>{analysis.title || 'Analyzed source post'}</strong>
+        <span>
+          {[analysis.platform, analysis.author, duration].filter(Boolean).join(' · ')}
+        </span>
+      </div>
+      <div className="source-badges">
+        <SourceBadge
+          icon={<FileText size={15} />}
+          label={transcriptReady ? `${transcript?.lineCount ?? 0} transcript lines` : 'Transcript unavailable'}
+          tone={transcriptReady ? 'ready' : 'muted'}
+        />
+        <SourceBadge
+          icon={<Mic2 size={15} />}
+          label={analysis.voice?.hasAudio ? 'Audio detected' : 'No audio track'}
+          tone={analysis.voice?.hasAudio ? 'ready' : 'muted'}
+        />
+        {analysis.url ? (
+          <button
+            className="source-link-button"
+            type="button"
+            onClick={() => window.studioHost?.openExternal(analysis.url ?? '')}
+          >
+            <ExternalLink size={15} />
+            Open
+          </button>
+        ) : null}
+      </div>
+      <p>
+        Use only owned, licensed, or explicitly permitted posts. Reusing a real voice requires separate consent.
+      </p>
+    </section>
+  )
+}
+
+function SourceBadge({
+  icon,
+  label,
+  tone,
+}: {
+  icon: ReactNode
+  label: string
+  tone: 'ready' | 'muted'
 }) {
   return (
-    <label className="upload-tile">
-      <input type="file" accept={accept} onChange={(event) => onFile(event.target.files)} />
-      <span className="upload-icon">{icon}</span>
-      <span>
-        <strong>{title}</strong>
-        <small>{description}</small>
-      </span>
-      <span className="file-pill">{fileName || 'Choose file'}</span>
-      {preview && title === 'Reference face' && <img src={preview} alt="" />}
-    </label>
+    <span className={`source-badge ${tone}`}>
+      {icon}
+      {label}
+    </span>
   )
+}
+
+function formatDuration(durationSeconds: number | null | undefined) {
+  if (!durationSeconds) return ''
+  const minutes = Math.floor(durationSeconds / 60)
+  const seconds = durationSeconds % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
 function CheckRow({
@@ -485,50 +536,87 @@ function CheckRow({
 }
 
 function SegmentedControl({
-  label,
   options,
   value,
   onChange,
 }: {
-  label: string
   options: Array<RenderPreset['resolution']>
   value: RenderPreset['resolution']
   onChange: (value: RenderPreset['resolution']) => void
 }) {
   return (
-    <div className="segmented">
-      <span>{label}</span>
-      <div>
-        {options.map((option) => (
-          <button
-            key={option}
-            className={value === option ? 'selected' : ''}
-            type="button"
-            onClick={() => onChange(option)}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
+    <div className="resolution-control">
+      {options.map((option) => (
+        <button
+          key={option}
+          className={value === option ? 'selected' : ''}
+          type="button"
+          onClick={() => onChange(option)}
+        >
+          {option}
+        </button>
+      ))}
     </div>
   )
 }
 
-function Toggle({
-  label,
-  checked,
-  onChange,
+function QueuePanel({
+  job,
+  jobs,
+  sourcePreview,
+  hostInfo,
 }: {
-  label: string
-  checked: boolean
-  onChange: (checked: boolean) => void
+  job?: RenderJob
+  jobs: RenderJob[]
+  sourcePreview: string | null
+  hostInfo: StudioHostInfo | null
 }) {
+  if (!job) return null
+
   return (
-    <label className="toggle">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <i />
-    </label>
+    <section className="queue-strip" aria-label="Queue and output">
+      <div className="queue-heading">
+        <div>
+          <span>Queue</span>
+          <h2>{job.title}</h2>
+        </div>
+        <strong>{job.progress}%</strong>
+      </div>
+      <div className="queue-preview">
+        {sourcePreview ? (
+          <video src={sourcePreview} muted controls />
+        ) : (
+          <div>
+            <Play size={28} />
+            <span>{job.status === 'complete' ? 'Mock output ready' : 'Renderer preview pending'}</span>
+          </div>
+        )}
+      </div>
+      <div className="queue-details">
+        <div className="progress-track">
+          <div style={{ width: `${job.progress}%` }} />
+        </div>
+        <div className="queue-meta">
+          <span>{jobs.length} local job{jobs.length === 1 ? '' : 's'}</span>
+          <span>{hostInfo?.packaged ? 'Installed app' : 'Dev build'}</span>
+          <JobStatusIcon status={job.status} />
+        </div>
+        <ul>
+          {job.audit.slice(-3).map((entry) => (
+            <li key={entry}>{entry}</li>
+          ))}
+        </ul>
+        <button
+          className="download-button"
+          type="button"
+          disabled={job.status !== 'complete'}
+          onClick={() => downloadManifest(job)}
+        >
+          <ArrowDownToLine size={16} />
+          Download manifest
+        </button>
+      </div>
+    </section>
   )
 }
 

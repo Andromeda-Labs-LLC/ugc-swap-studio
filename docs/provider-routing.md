@@ -34,6 +34,7 @@ For Andromeda Labs, the best near-term provider path is:
 
 Each provider adapter should implement:
 
+- Accept a normalized source-link analysis payload when the user uses a URL instead of a local video file.
 - Create job.
 - Poll status.
 - Fetch output.
@@ -46,7 +47,9 @@ No provider key should ever be present in React code, screenshots, committed fil
 ## Decision Criteria
 
 - Can it accept a reference face/image and source video?
+- Can it accept source metadata, captions/transcript, and action timing from a URL analyzer?
 - Does it preserve motion, audio, framing, and timing?
+- Does voice or retained source audio require separate consent, licensing, or provider-side policy checks?
 - Does the license permit Andromeda marketing use?
 - Does it support commercial output?
 - Is latency acceptable for batch creative testing?

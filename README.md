@@ -1,6 +1,6 @@
-# UGC Swap Studio
+# CopyTok
 
-UGC Swap Studio is a self-hosted desktop workflow app for creating AI-assisted UGC video variants. It is designed for small marketing teams that need a simple local queue, explicit rights checks, and a clean adapter boundary for future video-generation providers.
+CopyTok is a self-hosted desktop workflow app for creating AI-assisted UGC video variants from owned, licensed, generated, or explicitly permitted source posts. It is designed for small marketing teams that need a simple local queue, explicit rights checks, source-link analysis, and a clean adapter boundary for future video-generation providers.
 
 This project is a clean-room workflow clone of public-facing face-swap creator tools. It does not copy private code, private APIs, visual assets, or brand identity from any third-party product.
 
@@ -8,13 +8,16 @@ This project is a clean-room workflow clone of public-facing face-swap creator t
 
 - Electron + React desktop app for macOS.
 - Local project shell with reference-face and source-video intake.
+- Source-link analysis for permitted TikTok, Instagram, YouTube Shorts, and other URLs supported by `yt-dlp`.
+- Caption/transcript extraction when source captions are available.
+- Audio/voice readiness reporting with consent warnings.
 - Rights, consent, and AI-disclosure guardrail checks.
 - Provider-neutral render routing.
 - Mock local renderer that simulates queue progress.
 - Job history, audit trail, preview area, and downloadable job manifest.
 - Adapter slots for FaceFusion local, Pixverse cloud, HeyGen cloud, and Replicate-hosted model routing.
 
-The app does not yet perform real face swaps. The first release proves the workflow, UX, and provider architecture before secrets or external APIs are wired in.
+The app does not yet perform real face swaps. The first release proves the workflow, UX, source ingest, and provider architecture before secrets or external APIs are wired in.
 
 ## Run Locally
 
@@ -23,11 +26,17 @@ npm install
 npm run electron:dev
 ```
 
+For source-link analysis, install `yt-dlp` on the Mac:
+
+```bash
+brew install yt-dlp
+```
+
 ## Build The Mac App
 
 ```bash
 npm run app:dir
-open "release/mac-arm64/UGC Swap Studio.app"
+open "release/mac-arm64/CopyTok.app"
 ```
 
 The generated app is unsigned and intended for local internal use.
@@ -40,7 +49,7 @@ See [docs/provider-routing.md](docs/provider-routing.md).
 
 ## Guardrails
 
-This tool is for owned, licensed, generated, or consented media only. It should not be used to impersonate people, create misleading endorsements, evade platform synthetic-media labels, or process private media without permission.
+This tool is for owned, licensed, generated, or consented media only. It should not be used to impersonate people, clone voices without permission, create misleading endorsements, evade platform synthetic-media labels, or process private media without permission.
 
 See [docs/moderation-and-disclosure.md](docs/moderation-and-disclosure.md).
 

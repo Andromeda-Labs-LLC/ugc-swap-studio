@@ -1,17 +1,18 @@
 # Architecture
 
-UGC Swap Studio is intentionally split into a local app shell and provider adapters.
+CopyTok is intentionally split into a local app shell and provider adapters.
 
 ## Layers
 
 1. **Electron host**
    - Owns the desktop window.
    - Provides safe host metadata through preload IPC.
+   - Owns source-link analysis through `yt-dlp` so the renderer does not need social-platform credentials or vendor keys.
    - Later owns local filesystem workspace helpers.
 
 2. **React renderer**
    - Owns the interactive workflow.
-   - Handles uploads, rights checks, queue display, preset controls, and output review.
+   - Handles uploads, source-analysis results, rights checks, queue display, preset controls, and output review.
    - Does not store provider secrets or call video vendors directly.
 
 3. **Render provider contract**
@@ -30,7 +31,8 @@ UGC Swap Studio is intentionally split into a local app shell and provider adapt
 ```text
 User opens Mac app
   -> adds reference face
-  -> adds source video or optional URL
+  -> uploads a source video or pastes and analyzes a permitted source URL
+  -> source analyzer fetches post metadata and caption text when available
   -> completes rights and disclosure checks
   -> selects provider route
   -> creates local render job
@@ -43,6 +45,7 @@ User opens Mac app
 ```text
 React renderer
   -> Electron IPC or local API
+  -> source-link analyzer for permitted URL references
   -> provider adapter
   -> local worker or cloud vendor
   -> status polling / webhook
