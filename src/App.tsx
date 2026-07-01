@@ -68,11 +68,17 @@ function App() {
   const [sourcePreview, setSourcePreview] = useState<string | null>(null)
   const [sourceUrl, setSourceUrl] = useState('')
   const [sourceAnalysis, setSourceAnalysis] = useState<SourceLinkAnalysis | null>(null)
+  const [preparedSource, setPreparedSource] = useState<PreparedSource | null>(null)
+  const [renderPacket, setRenderPacket] = useState<RenderPacket | null>(null)
+  const [engineCapabilities, setEngineCapabilities] = useState<EngineCapabilities | null>(null)
   const [isAnalyzingSource, setIsAnalyzingSource] = useState(false)
+  const [isPreparingSource, setIsPreparingSource] = useState(false)
+  const [isCreatingPacket, setIsCreatingPacket] = useState(false)
   const [hostInfo, setHostInfo] = useState<StudioHostInfo | null>(null)
 
   useEffect(() => {
     window.studioHost?.getHostInfo().then(setHostInfo).catch(() => setHostInfo(null))
+    window.studioHost?.getEngineCapabilities().then(setEngineCapabilities).catch(() => setEngineCapabilities(null))
   }, [])
 
   useEffect(() => {
@@ -113,6 +119,8 @@ function App() {
     setSourceVideo(file.name)
     setSourceUrl('')
     setSourceAnalysis(null)
+    setPreparedSource(null)
+    setRenderPacket(null)
     setSourcePreview((existingPreview) => {
       if (existingPreview) URL.revokeObjectURL(existingPreview)
       return URL.createObjectURL(file)
@@ -127,6 +135,8 @@ function App() {
   function handleSourceUrlChange(value: string) {
     setSourceUrl(value)
     setSourceAnalysis(null)
+    setPreparedSource(null)
+    setRenderPacket(null)
     if (value) setSourceVideo('')
   }
 
@@ -137,6 +147,8 @@ function App() {
     try {
       const analysis = await window.studioHost.analyzeSourceUrl(sourceUrl.trim())
       setSourceAnalysis(analysis)
+      setPreparedSource(null)
+      setRenderPacket(null)
     } catch (error) {
       setSourceAnalysis({
         ok: false,
@@ -148,30 +160,80 @@ function App() {
     }
   }
 
-  function sourceReferenceSummary(): SourceReferenceSummary | undefined {
+  function sourceReferenceSummary(preparedOverride: PreparedSource | null = preparedSource): SourceReferenceSummary | undefined {
     if (!sourceAnalysis?.ok) return undefined
     return {
       title: sourceAnalysis.title ?? 'Analyzed source post',
       platform: sourceAnalysis.platform ?? 'Unknown platform',
       url: sourceAnalysis.url ?? sourceUrl,
-      durationSeconds: sourceAnalysis.durationSeconds ?? null,
+      durationSeconds: preparedOverride?.media?.durationSeconds ?? sourceAnalysis.durationSeconds ?? null,
       transcriptStatus: sourceAnalysis.transcript?.status ?? 'missing',
-      transcriptLines: sourceAnalysis.transcript?.lineCount ?? 0,
+      transcriptLines: preparedOverride?.transcript?.lineCount ?? sourceAnalysis.transcript?.lineCount ?? 0,
       voiceStatus: sourceAnalysis.voice?.status ?? 'Audio status unknown.',
+      preparedRunId: preparedOverride?.runId,
     }
   }
 
-  function startRenderJob() {
+  async function prepareSourceLink() {
+    if (!sourceUrl.trim() || !sourceAnalysis?.ok || !window.studioHost?.prepareSourceUrl) return null
+    setIsPreparingSource(true)
+    try {
+      const prepared = await window.studioHost.prepareSourceUrl(sourceUrl.trim())
+      setPreparedSource(prepared)
+      return prepared
+    } catch (error) {
+      const failed: PreparedSource = {
+        ok: false,
+        runId: 'failed',
+        preparedAt: new Date().toISOString(),
+        notes: [error instanceof Error ? error.message : String(error)],
+      }
+      setPreparedSource(failed)
+      return null
+    } finally {
+      setIsPreparingSource(false)
+    }
+  }
+
+  async function startRenderJob() {
     if (!readyToRender) return
-    const job = createMockRenderJob({
-      providerId,
-      referenceFace,
-      sourceVideo: sourceLabel,
-      sourceReference: sourceReferenceSummary(),
-      preset,
-      compliance,
-    })
-    setJobs((currentJobs) => [job, ...currentJobs])
+    setIsCreatingPacket(true)
+    try {
+      const prepared = sourceUrl && !sourceVideo ? preparedSource ?? (await prepareSourceLink()) : preparedSource
+      const packet =
+        window.studioHost?.createRenderPacket
+          ? await window.studioHost.createRenderPacket({
+              providerId,
+              referenceFace,
+              sourceVideo: sourceLabel,
+              sourceReference: sourceReferenceSummary(prepared),
+              preparedSource: prepared,
+              preset,
+              compliance,
+            })
+          : null
+      if (packet) setRenderPacket(packet)
+
+      const job = createMockRenderJob({
+        providerId,
+        referenceFace,
+        sourceVideo: sourceLabel,
+        sourceReference: sourceReferenceSummary(prepared),
+        enginePacket: packet
+          ? {
+              id: packet.id,
+              status: packet.status,
+              packetPath: packet.packetPath,
+              nextRequiredSecret: packet.nextRequiredSecret,
+            }
+          : undefined,
+        preset,
+        compliance,
+      })
+      setJobs((currentJobs) => [job, ...currentJobs])
+    } finally {
+      setIsCreatingPacket(false)
+    }
   }
 
   return (
@@ -274,7 +336,14 @@ function App() {
           />
         </section>
 
-        <SourceInsight analysis={sourceAnalysis} sourceUrl={sourceUrl} isAnalyzing={isAnalyzingSource} />
+        <SourceInsight
+          analysis={sourceAnalysis}
+          sourceUrl={sourceUrl}
+          isAnalyzing={isAnalyzingSource}
+          isPreparing={isPreparingSource}
+          preparedSource={preparedSource}
+          onPrepare={prepareSourceLink}
+        />
 
         <section className="control-panel" aria-label="Render controls">
           <div className="guardrail-block">
@@ -331,9 +400,14 @@ function App() {
             </label>
           </div>
 
-          <button className="generate-button" type="button" disabled={!readyToRender} onClick={startRenderJob}>
+          <button
+            className="generate-button"
+            type="button"
+            disabled={!readyToRender || isPreparingSource || isCreatingPacket}
+            onClick={startRenderJob}
+          >
             <Sparkles size={18} />
-            Generate Swap
+            {isPreparingSource || isCreatingPacket ? 'Preparing Engine Packet' : 'Generate Swap'}
           </button>
           {!readyToRender && (
             <p className="render-hint">
@@ -342,6 +416,8 @@ function App() {
             </p>
           )}
         </section>
+
+        <EngineStackPanel capabilities={engineCapabilities} renderPacket={renderPacket} />
 
         <QueuePanel job={activeJob} jobs={jobs} sourcePreview={sourcePreview} hostInfo={hostInfo} />
       </section>
@@ -405,10 +481,16 @@ function SourceInsight({
   analysis,
   sourceUrl,
   isAnalyzing,
+  isPreparing,
+  preparedSource,
+  onPrepare,
 }: {
   analysis: SourceLinkAnalysis | null
   sourceUrl: string
   isAnalyzing: boolean
+  isPreparing: boolean
+  preparedSource: PreparedSource | null
+  onPrepare: () => Promise<PreparedSource | null>
 }) {
   if (!sourceUrl && !analysis && !isAnalyzing) return null
 
@@ -419,6 +501,18 @@ function SourceInsight({
         <div>
           <strong>Fetching the source post</strong>
           <span>CopyTok is checking the post, captions, audio track, timing, and adapter readiness.</span>
+        </div>
+      </section>
+    )
+  }
+
+  if (isPreparing) {
+    return (
+      <section className="source-insight pending" aria-live="polite">
+        <RefreshCw size={18} className="spinning" />
+        <div>
+          <strong>Preparing source video</strong>
+          <span>CopyTok is downloading, clipping, normalizing, extracting audio, and building the provider handoff.</span>
         </div>
       </section>
     )
@@ -450,7 +544,9 @@ function SourceInsight({
 
   const transcript = analysis.transcript
   const transcriptReady = transcript?.status === 'ready'
+  const preparedTranscriptReady = preparedSource?.transcript?.status === 'ready'
   const duration = formatDuration(analysis.durationSeconds)
+  const preparedDuration = formatDuration(preparedSource?.media?.durationSeconds)
 
   return (
     <section className="source-insight success" aria-label="Analyzed source post">
@@ -468,8 +564,14 @@ function SourceInsight({
       <div className="source-badges">
         <SourceBadge
           icon={<FileText size={15} />}
-          label={transcriptReady ? `${transcript?.lineCount ?? 0} transcript lines` : 'Transcript unavailable'}
-          tone={transcriptReady ? 'ready' : 'muted'}
+          label={
+            preparedTranscriptReady
+              ? `${preparedSource?.transcript?.lineCount ?? 0} transcript lines`
+              : transcriptReady
+                ? `${transcript?.lineCount ?? 0} transcript lines`
+                : 'Transcript unavailable'
+          }
+          tone={preparedTranscriptReady || transcriptReady ? 'ready' : 'muted'}
         />
         <SourceBadge
           icon={<Mic2 size={15} />}
@@ -486,10 +588,64 @@ function SourceInsight({
             Open
           </button>
         ) : null}
+        {preparedSource?.ok ? (
+          <SourceBadge icon={<CheckCircle2 size={15} />} label="Normalized MP4" tone="ready" />
+        ) : (
+          <button className="source-link-button prepare" type="button" onClick={onPrepare}>
+            <RefreshCw size={15} />
+            Prepare
+          </button>
+        )}
       </div>
       <p>
-        Use only owned, licensed, or explicitly permitted posts. Reusing a real voice requires separate consent.
+        {preparedSource && !preparedSource.ok
+          ? `Preparation failed: ${preparedSource.notes?.[0] ?? 'Try a different permitted source link.'}`
+          : preparedSource?.ok
+          ? `Prepared ${preparedDuration || 'short-form'} source for fal/PixVerse adapter packets.`
+          : 'Use only owned, licensed, or explicitly permitted posts. Reusing a real voice requires separate consent.'}
       </p>
+    </section>
+  )
+}
+
+function EngineStackPanel({
+  capabilities,
+  renderPacket,
+}: {
+  capabilities: EngineCapabilities | null
+  renderPacket: RenderPacket | null
+}) {
+  const visibleTools = capabilities?.tools.filter((tool) =>
+    ['ytDlp', 'ffmpeg', 'ffprobe', 'whisperCli'].includes(tool.id),
+  )
+
+  return (
+    <section className="engine-strip" aria-label="Engine harness">
+      <div>
+        <span>Engine harness</span>
+        <strong>{capabilities?.ready ? 'Local ingest stack ready' : 'Checking local ingest stack'}</strong>
+      </div>
+      <div className="engine-tools">
+        {(visibleTools ?? []).map((tool) => (
+          <span key={tool.id} className={tool.status === 'ready' ? 'ready' : 'missing'} title={tool.role}>
+            {tool.status === 'ready' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}
+            {tool.label}
+          </span>
+        ))}
+      </div>
+      <div className="packet-pill">
+        {renderPacket ? (
+          <>
+            <CheckCircle2 size={15} />
+            Packet {renderPacket.id}
+          </>
+        ) : (
+          <>
+            <Sparkles size={15} />
+            fal/PixVerse packet slot
+          </>
+        )}
+      </div>
     </section>
   )
 }

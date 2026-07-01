@@ -8,6 +8,7 @@ CopyTok is intentionally split into a local app shell and provider adapters.
    - Owns the desktop window.
    - Provides safe host metadata through preload IPC.
    - Owns source-link analysis through `yt-dlp` so the renderer does not need social-platform credentials or vendor keys.
+   - Owns local engine preparation: source download, 30-second clipping, MP4 normalization, audio extraction, transcript fallback, and provider packet generation.
    - Later owns local filesystem workspace helpers.
 
 2. **React renderer**
@@ -33,9 +34,11 @@ User opens Mac app
   -> adds reference face
   -> uploads a source video or pastes and analyzes a permitted source URL
   -> source analyzer fetches post metadata and caption text when available
+  -> source preparer clips and normalizes the source for provider handoff
   -> completes rights and disclosure checks
   -> selects provider route
   -> creates local render job
+  -> host creates provider-ready render packet
   -> mock provider advances job status
   -> manifest export records job, preset, and guardrail state
 ```

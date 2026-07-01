@@ -6,8 +6,35 @@ interface StudioHostInfo {
   packaged: boolean;
 }
 
+interface EngineToolState {
+  id: string;
+  label: string;
+  role: string;
+  license: string;
+  sourceProject: string;
+  status: 'ready' | 'missing';
+  path: string;
+}
+
+interface EngineProviderState {
+  id: string;
+  label: string;
+  status: 'adapter-ready' | 'evaluation-only';
+  secretEnv: string;
+  role: string;
+}
+
+interface EngineCapabilities {
+  checkedAt: string;
+  ready: boolean;
+  tools: EngineToolState[];
+  whisperModel: string;
+  providers: EngineProviderState[];
+}
+
 interface SourceTranscript {
-  status: 'ready' | 'empty' | 'missing' | 'unavailable';
+  status: 'ready' | 'empty' | 'missing' | 'unavailable' | 'skipped';
+  source?: string;
   language: string;
   text: string;
   lineCount: number;
@@ -42,10 +69,53 @@ interface SourceLinkAnalysis {
   installHint?: string;
 }
 
+interface PreparedSourceMedia {
+  durationSeconds: number;
+  width: number | null;
+  height: number | null;
+  videoCodec: string;
+  audioCodec: string;
+  format: string;
+  sizeBytes: number;
+}
+
+interface PreparedSource {
+  ok: boolean;
+  runId: string;
+  preparedAt: string;
+  workspaceDir?: string;
+  files?: {
+    originalVideo: string;
+    normalizedVideo: string;
+    audio: string;
+  };
+  media?: PreparedSourceMedia | null;
+  analysis?: SourceLinkAnalysis;
+  transcript?: SourceTranscript & {
+    reason?: string;
+    path?: string;
+  };
+  nextAdapters?: string[];
+  notes?: string[];
+}
+
+interface RenderPacket {
+  id: string;
+  createdAt: string;
+  app: 'CopyTok';
+  status: 'provider-ready';
+  packetPath: string;
+  nextRequiredSecret: string;
+  providerPackets: Record<string, unknown>;
+}
+
 interface Window {
   studioHost?: {
     getHostInfo: () => Promise<StudioHostInfo>;
+    getEngineCapabilities: () => Promise<EngineCapabilities>;
     openExternal: (url: string) => Promise<boolean>;
     analyzeSourceUrl: (url: string) => Promise<SourceLinkAnalysis>;
+    prepareSourceUrl: (url: string) => Promise<PreparedSource>;
+    createRenderPacket: (input: unknown) => Promise<RenderPacket>;
   };
 }

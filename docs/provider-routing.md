@@ -35,6 +35,7 @@ For Andromeda Labs, the best near-term provider path is:
 Each provider adapter should implement:
 
 - Accept a normalized source-link analysis payload when the user uses a URL instead of a local video file.
+- Accept a prepared-source payload with local normalized MP4 path, audio path, media probe data, and transcript status.
 - Create job.
 - Poll status.
 - Fetch output.
@@ -60,3 +61,13 @@ No provider key should ever be present in React code, screenshots, committed fil
 ## Current Product Stance
 
 The v0.1 app ships with a mock provider only. This is intentional. It keeps the workflow usable and testable without prematurely committing to vendor terms, model licenses, or secret-bearing code paths.
+
+## Current Adapter Packets
+
+The Electron host can now write provider-ready packets for:
+
+- `fal-ai/pixverse/swap`
+- direct PixVerse swap placeholder
+- local face-swap lab placeholder
+
+The packets intentionally contain placeholders for uploaded asset URLs. A future secure adapter should upload the prepared avatar/source assets to approved storage, replace those placeholders, then call the provider with secrets stored outside React and outside the repository.

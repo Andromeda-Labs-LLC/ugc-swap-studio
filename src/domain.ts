@@ -51,6 +51,14 @@ export interface SourceReferenceSummary {
   transcriptStatus: string
   transcriptLines: number
   voiceStatus: string
+  preparedRunId?: string
+}
+
+export interface EnginePacketSummary {
+  id: string
+  status: string
+  packetPath?: string
+  nextRequiredSecret?: string
 }
 
 export interface RenderJob {
@@ -64,6 +72,7 @@ export interface RenderJob {
   referenceFace: string
   sourceVideo: string
   sourceReference?: SourceReferenceSummary
+  enginePacket?: EnginePacketSummary
   preset: RenderPreset
   compliance: ComplianceState
   audit: string[]
@@ -161,6 +170,7 @@ export function createMockRenderJob(input: {
   referenceFace: string
   sourceVideo: string
   sourceReference?: SourceReferenceSummary
+  enginePacket?: EnginePacketSummary
   preset: RenderPreset
   compliance: ComplianceState
 }): RenderJob {
@@ -176,6 +186,7 @@ export function createMockRenderJob(input: {
     referenceFace: input.referenceFace,
     sourceVideo: input.sourceVideo,
     sourceReference: input.sourceReference,
+    enginePacket: input.enginePacket,
     preset: input.preset,
     compliance: input.compliance,
     audit: [
@@ -185,6 +196,12 @@ export function createMockRenderJob(input: {
       input.sourceReference
         ? `Source link analyzed: ${input.sourceReference.platform}, ${input.sourceReference.transcriptLines} transcript lines.`
         : 'Source came from a local file or unanalyzed placeholder.',
+      input.sourceReference?.preparedRunId
+        ? `Source prepared locally: ${input.sourceReference.preparedRunId}.`
+        : 'Source preparation will run in the provider adapter later.',
+      input.enginePacket
+        ? `Provider packet created: ${input.enginePacket.id}.`
+        : 'Provider packet pending.',
       input.preset.provenance ? 'Provenance manifest requested.' : 'Provenance manifest disabled.',
     ],
   }

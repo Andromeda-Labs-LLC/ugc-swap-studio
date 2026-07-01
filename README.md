@@ -9,7 +9,10 @@ This project is a clean-room workflow clone of public-facing face-swap creator t
 - Electron + React desktop app for macOS.
 - Local project shell with reference-face and source-video intake.
 - Source-link analysis for permitted TikTok, Instagram, YouTube Shorts, and other URLs supported by `yt-dlp`.
+- Source-link preparation that clips, downloads, normalizes, and inspects the reference video.
+- Provider-ready render packet generation for fal/PixVerse-style adapters.
 - Caption/transcript extraction when source captions are available.
+- Local Whisper transcript fallback when `whisper.cpp` and a model are available.
 - Audio/voice readiness reporting with consent warnings.
 - Rights, consent, and AI-disclosure guardrail checks.
 - Provider-neutral render routing.
@@ -26,11 +29,15 @@ npm install
 npm run electron:dev
 ```
 
-For source-link analysis, install `yt-dlp` on the Mac:
+For source-link analysis and preparation, install the local media helpers on the Mac:
 
 ```bash
 brew install yt-dlp
+brew install ffmpeg
+brew install whisper-cpp
 ```
+
+Optional enhancement hooks can later use Real-ESRGAN and rembg. They are detected if installed but are not required for the core flow.
 
 ## Build The Mac App
 
@@ -46,6 +53,7 @@ The generated app is unsigned and intended for local internal use.
 Renderer UI code should never call vendor APIs directly. Add real video providers behind adapter modules that accept a normalized job payload and return provider job/status/output records. Keep API keys out of the repo and out of client-rendered code.
 
 See [docs/provider-routing.md](docs/provider-routing.md).
+See [docs/engine-harness.md](docs/engine-harness.md).
 
 ## Guardrails
 
