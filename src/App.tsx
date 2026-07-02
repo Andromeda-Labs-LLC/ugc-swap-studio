@@ -27,10 +27,12 @@ import {
   advanceJob,
   createMockRenderJob,
   downloadManifest,
+  falProviderOptions,
   providerOptions,
   starterJobs,
   type ComplianceState,
   type ProviderId,
+  type ProviderRenderResult,
   type RenderJob,
   type RenderPreset,
   type SourceReferenceSummary,
@@ -38,6 +40,7 @@ import {
 
 const defaultPreset: RenderPreset = {
   resolution: '720p',
+  aspectRatio: '9:16',
   watermark: false,
   provenance: true,
   faceRestore: true,
@@ -45,8 +48,8 @@ const defaultPreset: RenderPreset = {
 }
 
 const defaultCompliance: ComplianceState = {
-  faceConsent: false,
-  sourceRights: false,
+  faceConsent: true,
+  sourceRights: true,
   aiDisclosure: true,
 }
 
@@ -58,12 +61,14 @@ const navItems = [
 
 function App() {
   const [activeNav, setActiveNav] = useState('Projects')
-  const [providerId, setProviderId] = useState<ProviderId>('mock-local')
+  const [providerId, setProviderId] = useState<ProviderId>('fal-seedance-reference')
   const [preset, setPreset] = useState<RenderPreset>(defaultPreset)
-  const [compliance, setCompliance] = useState<ComplianceState>(defaultCompliance)
+  const [compliance] = useState<ComplianceState>(defaultCompliance)
   const [jobs, setJobs] = useState<RenderJob[]>(starterJobs)
   const [referenceFace, setReferenceFace] = useState('')
   const [sourceVideo, setSourceVideo] = useState('')
+  const [referenceFacePath, setReferenceFacePath] = useState('')
+  const [sourceVideoPath, setSourceVideoPath] = useState('')
   const [referencePreview, setReferencePreview] = useState<string | null>(null)
   const [sourcePreview, setSourcePreview] = useState<string | null>(null)
   const [sourceUrl, setSourceUrl] = useState('')
@@ -74,6 +79,9 @@ function App() {
   const [isAnalyzingSource, setIsAnalyzingSource] = useState(false)
   const [isPreparingSource, setIsPreparingSource] = useState(false)
   const [isCreatingPacket, setIsCreatingPacket] = useState(false)
+  const [isRenderingProvider, setIsRenderingProvider] = useState(false)
+  const [renderError, setRenderError] = useState('')
+  const [providerResult, setProviderResult] = useState<ProviderRenderResult | null>(null)
   const [hostInfo, setHostInfo] = useState<StudioHostInfo | null>(null)
 
   useEffect(() => {
@@ -97,16 +105,19 @@ function App() {
   const activeJob = jobs[0]
   const sourceLabel = sourceVideo || sourceAnalysis?.title || sourceUrl
   const readyToRender =
-    Boolean(referenceFace) &&
-    Boolean(sourceVideo || (sourceUrl && sourceAnalysis?.ok)) &&
-    compliance.faceConsent &&
-    compliance.sourceRights &&
-    compliance.aiDisclosure
+    Boolean(referenceFacePath) &&
+    Boolean(sourceVideoPath || (sourceUrl && sourceAnalysis?.ok))
+
+  function desktopFilePath(file: File) {
+    return (window.studioHost?.getFilePath?.(file) || (file as File & { path?: string }).path || '').trim()
+  }
 
   function handleReferenceUpload(fileList: FileList | null) {
     const file = fileList?.[0]
     if (!file) return
     setReferenceFace(file.name)
+    setReferenceFacePath(desktopFilePath(file))
+    setRenderError('')
     setReferencePreview((existingPreview) => {
       if (existingPreview) URL.revokeObjectURL(existingPreview)
       return URL.createObjectURL(file)
@@ -117,10 +128,13 @@ function App() {
     const file = fileList?.[0]
     if (!file) return
     setSourceVideo(file.name)
+    setSourceVideoPath(desktopFilePath(file))
     setSourceUrl('')
     setSourceAnalysis(null)
     setPreparedSource(null)
     setRenderPacket(null)
+    setRenderError('')
+    setProviderResult(null)
     setSourcePreview((existingPreview) => {
       if (existingPreview) URL.revokeObjectURL(existingPreview)
       return URL.createObjectURL(file)
@@ -129,14 +143,19 @@ function App() {
 
   function generateAvatarStub() {
     setReferenceFace('generated-avatar-reference.png')
+    setReferenceFacePath('')
     setReferencePreview(null)
+    setRenderError('Generate-avatar output is not wired to a local image file yet. Upload or save an avatar image before running fal.')
   }
 
   function handleSourceUrlChange(value: string) {
     setSourceUrl(value)
+    setSourceVideoPath('')
     setSourceAnalysis(null)
     setPreparedSource(null)
     setRenderPacket(null)
+    setProviderResult(null)
+    setRenderError('')
     if (value) setSourceVideo('')
   }
 
@@ -195,17 +214,57 @@ function App() {
     }
   }
 
+  async function prepareLocalSourceFile() {
+    if (!sourceVideoPath || !window.studioHost?.prepareSourceFile) return null
+    setIsPreparingSource(true)
+    try {
+      const prepared = await window.studioHost.prepareSourceFile(sourceVideoPath)
+      setPreparedSource(prepared)
+      return prepared
+    } catch (error) {
+      const failed: PreparedSource = {
+        ok: false,
+        runId: 'failed',
+        preparedAt: new Date().toISOString(),
+        notes: [error instanceof Error ? error.message : String(error)],
+      }
+      setPreparedSource(failed)
+      return null
+    } finally {
+      setIsPreparingSource(false)
+    }
+  }
+
   async function startRenderJob() {
     if (!readyToRender) return
     setIsCreatingPacket(true)
+    setIsRenderingProvider(false)
+    setRenderError('')
+    setProviderResult(null)
     try {
-      const prepared = sourceUrl && !sourceVideo ? preparedSource ?? (await prepareSourceLink()) : preparedSource
+      if (!referenceFacePath) {
+        throw new Error('Upload a saved avatar image before running fal. Generated avatar stubs are not files yet.')
+      }
+
+      const prepared =
+        sourceUrl && !sourceVideo
+          ? preparedSource ?? (await prepareSourceLink())
+          : sourceVideoPath
+            ? preparedSource ?? (await prepareLocalSourceFile())
+            : preparedSource
+
+      if (!prepared?.ok) {
+        throw new Error('Prepare the source footage before sending it to the selected provider.')
+      }
+
       const packet =
         window.studioHost?.createRenderPacket
           ? await window.studioHost.createRenderPacket({
               providerId,
               referenceFace,
+              referenceFacePath,
               sourceVideo: sourceLabel,
+              sourceVideoPath,
               sourceReference: sourceReferenceSummary(prepared),
               preparedSource: prepared,
               preset,
@@ -214,7 +273,7 @@ function App() {
           : null
       if (packet) setRenderPacket(packet)
 
-      const job = createMockRenderJob({
+      const jobInput: Parameters<typeof createMockRenderJob>[0] = {
         providerId,
         referenceFace,
         sourceVideo: sourceLabel,
@@ -229,10 +288,37 @@ function App() {
           : undefined,
         preset,
         compliance,
-      })
+      }
+
+      let providerRender: ProviderRenderResult | undefined
+      if (providerId === 'fal-seedance-reference' || providerId === 'fal-pixverse-swap') {
+        if (!window.studioHost?.renderWithProvider) {
+          throw new Error('This CopyTok build does not expose the fal render adapter yet.')
+        }
+        setIsRenderingProvider(true)
+        providerRender = await window.studioHost.renderWithProvider({
+          providerId,
+          referenceFace,
+          referenceFacePath,
+          sourceVideo: sourceLabel,
+          sourceVideoPath,
+          sourceReference: sourceReferenceSummary(prepared),
+          preparedSource: prepared,
+          preset,
+          compliance,
+        })
+        if (providerRender) setProviderResult(providerRender)
+        jobInput.providerRender = providerRender
+      }
+
+      const job = createMockRenderJob(jobInput)
       setJobs((currentJobs) => [job, ...currentJobs])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setRenderError(message)
     } finally {
       setIsCreatingPacket(false)
+      setIsRenderingProvider(false)
     }
   }
 
@@ -346,80 +432,71 @@ function App() {
         />
 
         <section className="control-panel" aria-label="Render controls">
-          <div className="guardrail-block">
-            <strong>Rights & disclosure</strong>
-            <CheckRow
-              label="I own or have permission for the avatar image."
-              checked={compliance.faceConsent}
-              onChange={(value) => setCompliance((current) => ({ ...current, faceConsent: value }))}
-            />
-            <CheckRow
-              label="I own or have permission for the source action, transcript, audio, and voice reference."
-              checked={compliance.sourceRights}
-              onChange={(value) => setCompliance((current) => ({ ...current, sourceRights: value }))}
-            />
-            <CheckRow
-              label="I will disclose AI usage where appropriate."
-              checked={compliance.aiDisclosure}
-              onChange={(value) => setCompliance((current) => ({ ...current, aiDisclosure: value }))}
-            />
-          </div>
-
           <div className="provider-block">
-            <label htmlFor="provider">Provider</label>
-            <select
-              id="provider"
-              value={providerId}
-              onChange={(event) => setProviderId(event.target.value as ProviderId)}
-            >
-              {providerOptions.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
+            <ProviderChips
+              providerId={providerId}
+              capabilities={engineCapabilities}
+              onChange={setProviderId}
+            />
             <small>{selectedProvider.bestFor}</small>
           </div>
 
           <div className="output-block">
             <span>Output</span>
+            <label className="control-label">Aspect ratio</label>
+            <SegmentedControl
+              options={['9:16', '1:1', '16:9']}
+              value={preset.aspectRatio}
+              onChange={(aspectRatio) =>
+                setPreset((current) => ({ ...current, aspectRatio: aspectRatio as RenderPreset['aspectRatio'] }))
+              }
+            />
+            <label className="control-label">Resolution</label>
             <SegmentedControl
               options={['720p', '1080p']}
               value={preset.resolution}
-              onChange={(resolution) => setPreset((current) => ({ ...current, resolution }))}
+              onChange={(resolution) =>
+                setPreset((current) => ({ ...current, resolution: resolution as RenderPreset['resolution'] }))
+              }
             />
-            <label className="mini-toggle">
-              <input
-                type="checkbox"
-                checked={preset.provenance}
-                onChange={(event) =>
-                  setPreset((current) => ({ ...current, provenance: event.target.checked }))
-                }
-              />
-              Provenance
-            </label>
           </div>
 
           <button
             className="generate-button"
             type="button"
-            disabled={!readyToRender || isPreparingSource || isCreatingPacket}
+            disabled={!readyToRender || isPreparingSource || isCreatingPacket || isRenderingProvider}
             onClick={startRenderJob}
           >
             <Sparkles size={18} />
-            {isPreparingSource || isCreatingPacket ? 'Preparing Engine Packet' : 'Generate Swap'}
+            {isRenderingProvider
+              ? 'Rendering on fal'
+              : isPreparingSource || isCreatingPacket
+                ? 'Preparing Engine Packet'
+                : 'Generate Swap'}
           </button>
           {!readyToRender && (
             <p className="render-hint">
               <CircleAlert size={15} />
-              Add an avatar, upload a video or analyze a link, and complete the checks.
+              Add an avatar and upload a video or analyze a link.
+            </p>
+          )}
+          {renderError && (
+            <p className="render-error">
+              <CircleAlert size={15} />
+              {renderError}
             </p>
           )}
         </section>
 
         <EngineStackPanel capabilities={engineCapabilities} renderPacket={renderPacket} />
 
-        <QueuePanel job={activeJob} jobs={jobs} sourcePreview={sourcePreview} hostInfo={hostInfo} />
+        <QueuePanel
+          job={activeJob}
+          jobs={jobs}
+          sourcePreview={sourcePreview}
+          outputPreview={providerResult?.outputUrl ?? activeJob?.providerRender?.outputUrl ?? null}
+          hostInfo={hostInfo}
+        />
       </section>
     </main>
   )
@@ -436,6 +513,7 @@ function UploadCard({
   fileName,
   preview,
   onFile,
+  afterDrop,
   footer,
 }: {
   accent: 'teal' | 'violet'
@@ -448,6 +526,7 @@ function UploadCard({
   fileName: string
   preview: string | null
   onFile: (files: FileList | null) => void
+  afterDrop?: ReactNode
   footer: ReactNode
 }) {
   return (
@@ -472,8 +551,45 @@ function UploadCard({
         )}
       </label>
       {fileName ? <span className="file-chip">{fileName}</span> : null}
+      {afterDrop}
       {footer}
     </article>
+  )
+}
+
+function ProviderChips({
+  providerId,
+  capabilities,
+  onChange,
+}: {
+  providerId: ProviderId
+  capabilities: EngineCapabilities | null
+  onChange: (providerId: ProviderId) => void
+}) {
+  return (
+    <div className="provider-chips" aria-label="fal provider">
+      <span>PROVIDER</span>
+      <div>
+        {falProviderOptions.map((provider) => {
+          const Icon = provider.icon
+          const capability = capabilities?.providers.find((item) => item.id === provider.id)
+          const missingSecret = capability?.status === 'missing-secret'
+          return (
+            <button
+              key={provider.id}
+              className={providerId === provider.id ? 'selected' : ''}
+              type="button"
+              title={missingSecret ? 'FAL_KEY is missing from the CopyTok Keychain.' : provider.bestFor}
+              onClick={() => onChange(provider.id)}
+            >
+              <Icon size={15} />
+              <strong>{provider.shortName}</strong>
+              <small>{missingSecret ? 'Needs key' : provider.id === 'fal-seedance-reference' ? 'Best quality' : 'Fast swap'}</small>
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -674,31 +790,14 @@ function formatDuration(durationSeconds: number | null | undefined) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-function CheckRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <label className="check-row">
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <span>{label}</span>
-    </label>
-  )
-}
-
 function SegmentedControl({
   options,
   value,
   onChange,
 }: {
-  options: Array<RenderPreset['resolution']>
-  value: RenderPreset['resolution']
-  onChange: (value: RenderPreset['resolution']) => void
+  options: string[]
+  value: string
+  onChange: (value: string) => void
 }) {
   return (
     <div className="resolution-control">
@@ -720,11 +819,13 @@ function QueuePanel({
   job,
   jobs,
   sourcePreview,
+  outputPreview,
   hostInfo,
 }: {
   job?: RenderJob
   jobs: RenderJob[]
   sourcePreview: string | null
+  outputPreview: string | null
   hostInfo: StudioHostInfo | null
 }) {
   if (!job) return null
@@ -739,12 +840,14 @@ function QueuePanel({
         <strong>{job.progress}%</strong>
       </div>
       <div className="queue-preview">
-        {sourcePreview ? (
+        {outputPreview ? (
+          <video src={outputPreview} controls />
+        ) : sourcePreview ? (
           <video src={sourcePreview} muted controls />
         ) : (
           <div>
             <Play size={28} />
-            <span>{job.status === 'complete' ? 'Mock output ready' : 'Renderer preview pending'}</span>
+            <span>{job.status === 'complete' ? 'Output ready' : 'Renderer preview pending'}</span>
           </div>
         )}
       </div>

@@ -11,9 +11,10 @@ import {
 } from 'lucide-react'
 
 export type ProviderId =
+  | 'fal-seedance-reference'
+  | 'fal-pixverse-swap'
   | 'mock-local'
   | 'facefusion-local'
-  | 'pixverse-cloud'
   | 'heygen-cloud'
   | 'replicate-cloud'
 
@@ -26,11 +27,27 @@ export interface ProviderOption {
   mode: 'Local' | 'Cloud'
   icon: ComponentType<{ size?: number; strokeWidth?: number }>
   bestFor: string
-  status: 'Ready mock' | 'Adapter slot' | 'Recommended candidate'
+  status: 'Live fal route' | 'Ready mock' | 'Adapter slot' | 'Recommended candidate'
+}
+
+export interface ProviderRenderResult {
+  ok: boolean
+  providerId: ProviderId
+  providerName: string
+  model?: string
+  status: 'complete' | 'blocked'
+  requestId?: string
+  outputUrl?: string
+  outputPath?: string
+  providerPayloadPath?: string
+  error?: string
+  logs?: string[]
+  createdAt: string
 }
 
 export interface RenderPreset {
   resolution: '720p' | '1080p'
+  aspectRatio: '9:16' | '1:1' | '16:9'
   watermark: boolean
   provenance: boolean
   faceRestore: boolean
@@ -73,12 +90,31 @@ export interface RenderJob {
   sourceVideo: string
   sourceReference?: SourceReferenceSummary
   enginePacket?: EnginePacketSummary
+  providerRender?: ProviderRenderResult
   preset: RenderPreset
   compliance: ComplianceState
   audit: string[]
 }
 
 export const providerOptions: ProviderOption[] = [
+  {
+    id: 'fal-seedance-reference',
+    name: 'fal Seedance 2.0 Reference',
+    shortName: 'Seedance',
+    mode: 'Cloud',
+    icon: Sparkles,
+    bestFor: 'Highest-quality reference-to-video generation using avatar image, source video, and optional audio reference.',
+    status: 'Live fal route',
+  },
+  {
+    id: 'fal-pixverse-swap',
+    name: 'fal PixVerse Swap',
+    shortName: 'PixVerse',
+    mode: 'Cloud',
+    icon: Clapperboard,
+    bestFor: 'Closest one-click face/body swap route for preserving original source movement and audio.',
+    status: 'Live fal route',
+  },
   {
     id: 'mock-local',
     name: 'Mock Local Renderer',
@@ -96,15 +132,6 @@ export const providerOptions: ProviderOption[] = [
     icon: Boxes,
     bestFor: 'Private local rendering on the Mac Mini once model weights and licenses are explicitly accepted.',
     status: 'Adapter slot',
-  },
-  {
-    id: 'pixverse-cloud',
-    name: 'Pixverse / SWAP Cloud',
-    shortName: 'Pixverse',
-    mode: 'Cloud',
-    icon: Sparkles,
-    bestFor: 'Closest conceptual match to SwapTok-style video swap behavior if API access is available.',
-    status: 'Recommended candidate',
   },
   {
     id: 'heygen-cloud',
@@ -126,6 +153,10 @@ export const providerOptions: ProviderOption[] = [
   },
 ]
 
+export const falProviderOptions = providerOptions.filter((provider) =>
+  ['fal-seedance-reference', 'fal-pixverse-swap'].includes(provider.id),
+)
+
 export const starterJobs: RenderJob[] = [
   {
     id: 'job-demo-001',
@@ -139,6 +170,7 @@ export const starterJobs: RenderJob[] = [
     sourceVideo: 'ugc-hook-template.mp4',
     preset: {
       resolution: '720p',
+      aspectRatio: '9:16',
       watermark: false,
       provenance: true,
       faceRestore: true,
@@ -171,22 +203,25 @@ export function createMockRenderJob(input: {
   sourceVideo: string
   sourceReference?: SourceReferenceSummary
   enginePacket?: EnginePacketSummary
+  providerRender?: ProviderRenderResult
   preset: RenderPreset
   compliance: ComplianceState
 }): RenderJob {
   const timestamp = new Date().toISOString()
+  const providerRender = input.providerRender
   return {
     id: `job-${Date.now().toString(36)}`,
     title: `${input.sourceVideo.replace(/\.[a-z0-9]+$/i, '') || 'UGC source'} swap`,
     providerId: input.providerId,
-    status: 'queued',
-    progress: 2,
+    status: providerRender ? (providerRender.ok ? 'complete' : 'blocked') : 'queued',
+    progress: providerRender ? (providerRender.ok ? 100 : 0) : 2,
     createdAt: timestamp,
     updatedAt: timestamp,
     referenceFace: input.referenceFace,
     sourceVideo: input.sourceVideo,
     sourceReference: input.sourceReference,
     enginePacket: input.enginePacket,
+    providerRender,
     preset: input.preset,
     compliance: input.compliance,
     audit: [
@@ -202,6 +237,11 @@ export function createMockRenderJob(input: {
       input.enginePacket
         ? `Provider packet created: ${input.enginePacket.id}.`
         : 'Provider packet pending.',
+      providerRender?.ok && providerRender.outputPath
+        ? `Provider render complete: ${providerRender.outputPath}.`
+        : providerRender && !providerRender.ok
+          ? `Provider render blocked: ${providerRender.error ?? 'Unknown provider error'}.`
+          : 'Provider render not started yet.',
       input.preset.provenance ? 'Provenance manifest requested.' : 'Provenance manifest disabled.',
     ],
   }

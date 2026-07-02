@@ -19,7 +19,7 @@ interface EngineToolState {
 interface EngineProviderState {
   id: string;
   label: string;
-  status: 'adapter-ready' | 'evaluation-only';
+  status: 'adapter-ready' | 'evaluation-only' | 'missing-secret';
   secretEnv: string;
   role: string;
 }
@@ -99,6 +99,27 @@ interface PreparedSource {
   notes?: string[];
 }
 
+interface ProviderRenderResult {
+  ok: boolean;
+  providerId:
+    | 'fal-seedance-reference'
+    | 'fal-pixverse-swap'
+    | 'mock-local'
+    | 'facefusion-local'
+    | 'heygen-cloud'
+    | 'replicate-cloud';
+  providerName: string;
+  model?: string;
+  status: 'complete' | 'blocked';
+  requestId?: string;
+  outputUrl?: string;
+  outputPath?: string;
+  providerPayloadPath?: string;
+  error?: string;
+  logs?: string[];
+  createdAt: string;
+}
+
 interface RenderPacket {
   id: string;
   createdAt: string;
@@ -113,9 +134,12 @@ interface Window {
   studioHost?: {
     getHostInfo: () => Promise<StudioHostInfo>;
     getEngineCapabilities: () => Promise<EngineCapabilities>;
+    getFilePath: (file: File) => string;
     openExternal: (url: string) => Promise<boolean>;
     analyzeSourceUrl: (url: string) => Promise<SourceLinkAnalysis>;
     prepareSourceUrl: (url: string) => Promise<PreparedSource>;
+    prepareSourceFile: (filePath: string) => Promise<PreparedSource>;
     createRenderPacket: (input: unknown) => Promise<RenderPacket>;
+    renderWithProvider: (input: unknown) => Promise<ProviderRenderResult>;
   };
 }

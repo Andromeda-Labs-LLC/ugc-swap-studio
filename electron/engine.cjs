@@ -6,7 +6,22 @@ const path = require('path');
 
 const DEFAULT_TIMEOUT_MS = 90000;
 const MAX_BUFFER = 1024 * 1024 * 12;
-const MAX_SOURCE_SECONDS = 30;
+const MAX_SOURCE_SECONDS = 15;
+const FAL_KEYCHAIN_SERVICE = 'CopyTok';
+const FAL_KEYCHAIN_ACCOUNT = 'FAL_KEY';
+
+const FAL_PROVIDERS = {
+  'fal-seedance-reference': {
+    label: 'fal Seedance 2.0 Reference',
+    model: 'bytedance/seedance-2.0/reference-to-video',
+    role: 'Reference-to-video route using avatar image, source action video, and optional audio reference.',
+  },
+  'fal-pixverse-swap': {
+    label: 'fal PixVerse Swap',
+    model: 'fal-ai/pixverse/swap',
+    role: 'Swap route using target avatar image and normalized source video.',
+  },
+};
 
 const TOOL_CANDIDATES = {
   ytDlp: ['/opt/homebrew/bin/yt-dlp', '/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', 'yt-dlp'],
@@ -39,6 +54,44 @@ function resolveTool(toolId) {
     }
   }
   return '';
+}
+
+function readKeychainSecret(service, account) {
+  const result = spawnSync('/usr/bin/security', ['find-generic-password', '-a', account, '-s', service, '-w'], {
+    encoding: 'utf8',
+  });
+  return result.status === 0 ? result.stdout.trim() : '';
+}
+
+function resolveFalKey() {
+  return process.env.FAL_KEY || readKeychainSecret(FAL_KEYCHAIN_SERVICE, FAL_KEYCHAIN_ACCOUNT);
+}
+
+function falSecretStatus() {
+  return resolveFalKey() ? 'adapter-ready' : 'missing-secret';
+}
+
+function assertExistingFile(filePath, label) {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    throw new Error(`${label} is missing. Re-select the file in CopyTok and try again.`);
+  }
+  const resolvedPath = filePath.trim();
+  if (!path.isAbsolute(resolvedPath) || !fs.existsSync(resolvedPath)) {
+    throw new Error(`${label} is not available to the desktop backend.`);
+  }
+  return resolvedPath;
+}
+
+function mimeTypeForFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (['.jpg', '.jpeg'].includes(ext)) return 'image/jpeg';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.mov') return 'video/quicktime';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.m4a') return 'audio/mp4';
+  return 'video/mp4';
 }
 
 function toolState(toolId, label, role, license, sourceProject) {
@@ -84,11 +137,18 @@ function getEngineCapabilities(appRoot) {
     whisperModel: whisperModel ? path.basename(whisperModel) : '',
     providers: [
       {
-        id: 'fal-pixverse-swap',
-        label: 'fal PixVerse Swap',
-        status: 'adapter-ready',
+        id: 'fal-seedance-reference',
+        label: FAL_PROVIDERS['fal-seedance-reference'].label,
+        status: falSecretStatus(),
         secretEnv: 'FAL_KEY',
-        role: 'Primary high-quality still-image plus source-video swap route.',
+        role: FAL_PROVIDERS['fal-seedance-reference'].role,
+      },
+      {
+        id: 'fal-pixverse-swap',
+        label: FAL_PROVIDERS['fal-pixverse-swap'].label,
+        status: falSecretStatus(),
+        secretEnv: 'FAL_KEY',
+        role: FAL_PROVIDERS['fal-pixverse-swap'].role,
       },
       {
         id: 'pixverse-direct-swap',
@@ -468,7 +528,7 @@ async function prepareSourceUrl(rawUrl, options = {}) {
     media: normalizedProbe,
     analysis,
     transcript,
-    nextAdapters: ['fal-pixverse-swap', 'pixverse-direct-swap', 'local-faceswap-lab'],
+    nextAdapters: ['fal-seedance-reference', 'fal-pixverse-swap', 'pixverse-direct-swap', 'local-faceswap-lab'],
     notes: [
       `Source clipped to the first ${MAX_SOURCE_SECONDS} seconds for predictable cost and provider limits.`,
       'Normalized MP4 is ready for upload to provider storage.',
@@ -482,19 +542,129 @@ async function prepareSourceUrl(rawUrl, options = {}) {
   return prepared;
 }
 
+async function prepareSourceFile(filePath, options = {}) {
+  const originalInputPath = assertExistingFile(filePath, 'Source video');
+  if (!/\.(mp4|mov|m4v|webm|mkv)$/i.test(originalInputPath)) {
+    throw new Error('Source footage must be a video file.');
+  }
+
+  const userDataPath = options.userDataPath || os.tmpdir();
+  const appRoot = options.appRoot || '';
+  const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const workspaceDir = path.join(userDataPath, 'source-cache', runId);
+  await fsPromises.mkdir(workspaceDir, { recursive: true });
+
+  const originalPath = path.join(workspaceDir, `source${path.extname(originalInputPath).toLowerCase() || '.mp4'}`);
+  await fsPromises.copyFile(originalInputPath, originalPath);
+
+  const originalProbe = resolveTool('ffprobe') ? await ffprobe(originalPath) : null;
+  const normalizedPath = path.join(workspaceDir, 'normalized.mp4');
+  let normalizedProbe = originalProbe;
+
+  if (resolveTool('ffmpeg')) {
+    await runTool(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        originalPath,
+        '-t',
+        String(MAX_SOURCE_SECONDS),
+        '-vf',
+        "scale='if(gt(iw,1080),1080,iw)':-2,fps=30,format=yuv420p",
+        '-c:v',
+        'libx264',
+        '-preset',
+        'medium',
+        '-crf',
+        '20',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '160k',
+        '-movflags',
+        '+faststart',
+        normalizedPath,
+      ],
+      { timeout: 1000 * 60 * 6, maxBuffer: MAX_BUFFER },
+    );
+    normalizedProbe = await ffprobe(normalizedPath);
+  }
+
+  const audioPath = path.join(workspaceDir, 'source-audio-16k.wav');
+  if (resolveTool('ffmpeg')) {
+    await runTool(
+      'ffmpeg',
+      ['-y', '-i', fs.existsSync(normalizedPath) ? normalizedPath : originalPath, '-vn', '-ac', '1', '-ar', '16000', audioPath],
+      { timeout: 1000 * 60 * 3, maxBuffer: MAX_BUFFER },
+    ).catch(() => null);
+  }
+
+  const transcript = await extractWhisperTranscript(audioPath, workspaceDir, appRoot);
+  const prepared = {
+    ok: true,
+    runId,
+    preparedAt: new Date().toISOString(),
+    workspaceDir,
+    files: {
+      originalVideo: originalPath,
+      normalizedVideo: fs.existsSync(normalizedPath) ? normalizedPath : originalPath,
+      audio: fs.existsSync(audioPath) ? audioPath : '',
+    },
+    media: normalizedProbe,
+    analysis: null,
+    transcript,
+    nextAdapters: ['fal-seedance-reference', 'fal-pixverse-swap'],
+    notes: [
+      `Local source clipped to the first ${MAX_SOURCE_SECONDS} seconds for predictable cost and provider limits.`,
+      'Normalized MP4 is ready for upload to fal storage.',
+      transcript.status === 'ready'
+        ? `Transcript ready via ${transcript.source}.`
+        : 'Transcript unavailable; provider can still render motion/reference video.',
+    ],
+  };
+
+  await fsPromises.writeFile(path.join(workspaceDir, 'prepared-source.json'), JSON.stringify(prepared, null, 2));
+  return prepared;
+}
+
 function buildProviderPackets(input) {
   const resolution = input.preset?.resolution ?? '720p';
+  const aspectRatio = input.preset?.aspectRatio ?? '9:16';
+  const pixverseResolution = falResolution('fal-pixverse-swap', resolution);
   return {
+    falSeedanceReference: {
+      provider: 'fal',
+      model: FAL_PROVIDERS['fal-seedance-reference'].model,
+      secretEnv: 'FAL_KEY',
+      mode: 'queue',
+      request: {
+        prompt: seedancePrompt(input, {
+          imageUrl: '<upload-avatar-image-to-storage-first>',
+          videoUrl: '<upload-normalized-source-video-to-storage-first>',
+          audioUrl: '<optional-uploaded-source-audio>',
+        }),
+        image_urls: ['<upload-avatar-image-to-storage-first>'],
+        video_urls: ['<upload-normalized-source-video-to-storage-first>'],
+        audio_urls: ['<optional-uploaded-source-audio>'],
+        resolution,
+        duration: 'auto',
+        aspect_ratio: aspectRatio,
+        generate_audio: true,
+        bitrate_mode: 'high',
+        end_user_id: 'copytok-local',
+      },
+    },
     falPixverseSwap: {
       provider: 'fal',
-      model: 'fal-ai/pixverse/swap',
+      model: FAL_PROVIDERS['fal-pixverse-swap'].model,
       secretEnv: 'FAL_KEY',
       mode: 'queue',
       request: {
         image_url: '<upload-avatar-image-to-storage-first>',
         video_url: '<upload-normalized-source-video-to-storage-first>',
         mode: 'person',
-        resolution,
+        resolution: pixverseResolution,
         original_sound_switch: true,
       },
     },
@@ -523,6 +693,191 @@ function buildProviderPackets(input) {
   };
 }
 
+function seedancePrompt(input) {
+  const transcript = input.preparedSource?.transcript?.text
+    ? ` Reference transcript: ${truncate(input.preparedSource.transcript.text, 1600)}`
+    : '';
+  const audioInstruction = input.preparedSource?.files?.audio
+    ? ' Use @Audio1 as the audio, voice, cadence, and timing reference when possible.'
+    : '';
+  return [
+    'Create a vertical social UGC clip using @Image1 as the avatar identity and @Video1 as the action, camera, gesture, timing, framing, and edit reference.',
+    'Keep the output realistic, clean, brand-safe, and suitable for internal marketing review.',
+    'Preserve the source clip pacing and body performance as closely as the model allows.',
+    audioInstruction,
+    transcript,
+  ]
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function loadFalClient() {
+  const falKey = resolveFalKey();
+  if (!falKey) {
+    throw new Error('FAL_KEY is not available in the CopyTok Keychain entry or environment.');
+  }
+  const { fal } = await import('@fal-ai/client');
+  fal.config({ credentials: falKey });
+  return fal;
+}
+
+function createUploadFile(bytes, filePath) {
+  const fileName = path.basename(filePath);
+  const type = mimeTypeForFile(filePath);
+  if (typeof File === 'function') {
+    return new File([bytes], fileName, { type });
+  }
+  if (typeof Blob === 'function') {
+    const blob = new Blob([bytes], { type });
+    blob.name = fileName;
+    return blob;
+  }
+  throw new Error('This Electron runtime cannot create upload files for fal storage.');
+}
+
+async function uploadFileToFal(fal, filePath) {
+  const bytes = await fsPromises.readFile(filePath);
+  return fal.storage.upload(createUploadFile(bytes, filePath));
+}
+
+function falResolution(providerId, presetResolution) {
+  if (providerId === 'fal-pixverse-swap') {
+    return presetResolution === '1080p' ? '720p' : presetResolution;
+  }
+  return presetResolution ?? '720p';
+}
+
+function buildFalRequest(providerId, input, urls) {
+  const resolution = falResolution(providerId, input.preset?.resolution ?? '720p');
+  const aspectRatio = input.preset?.aspectRatio ?? '9:16';
+  if (providerId === 'fal-pixverse-swap') {
+    return {
+      video_url: urls.videoUrl,
+      mode: 'person',
+      keyframe_id: 1,
+      image_url: urls.imageUrl,
+      resolution,
+      original_sound_switch: true,
+    };
+  }
+
+  const request = {
+    prompt: seedancePrompt(input),
+    image_urls: [urls.imageUrl],
+    video_urls: [urls.videoUrl],
+    resolution,
+    duration: 'auto',
+    aspect_ratio: aspectRatio,
+    generate_audio: true,
+    bitrate_mode: resolution === '1080p' ? 'high' : 'standard',
+    end_user_id: 'copytok-local',
+  };
+  if (urls.audioUrl) {
+    request.audio_urls = [urls.audioUrl];
+  }
+  return request;
+}
+
+function extractFalVideoUrl(data) {
+  if (data?.video?.url) return data.video.url;
+  if (Array.isArray(data?.videos) && data.videos[0]?.url) return data.videos[0].url;
+  if (typeof data?.url === 'string') return data.url;
+  throw new Error('fal completed the request, but no output video URL was returned.');
+}
+
+async function downloadProviderOutput(url, outputDir, providerId, requestId) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Generated video download failed with ${response.status}.`);
+  }
+  await fsPromises.mkdir(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, `${providerId}-${requestId || Date.now().toString(36)}.mp4`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await fsPromises.writeFile(outputPath, bytes);
+  return outputPath;
+}
+
+async function renderWithProvider(input, options = {}) {
+  const provider = FAL_PROVIDERS[input.providerId];
+  const createdAt = new Date().toISOString();
+  if (!provider) {
+    throw new Error('Select Seedance or PixVerse before rendering.');
+  }
+  if (!input.compliance?.faceConsent || !input.compliance?.sourceRights || !input.compliance?.aiDisclosure) {
+    throw new Error('Complete the rights and AI disclosure checks before rendering.');
+  }
+
+  const userDataPath = options.userDataPath || os.tmpdir();
+  const appRoot = options.appRoot || '';
+  const referencePath = assertExistingFile(input.referenceFacePath, 'Avatar image');
+  const preparedSource =
+    input.preparedSource?.ok
+      ? input.preparedSource
+      : input.sourceVideoPath
+        ? await prepareSourceFile(input.sourceVideoPath, { userDataPath, appRoot })
+        : null;
+  const sourceVideoPath = preparedSource?.files?.normalizedVideo
+    ? assertExistingFile(preparedSource.files.normalizedVideo, 'Prepared source video')
+    : assertExistingFile(input.sourceVideoPath, 'Source video');
+  const fal = await loadFalClient();
+  const logs = [];
+  const imageUrl = await uploadFileToFal(fal, referencePath);
+  const videoUrl = await uploadFileToFal(fal, sourceVideoPath);
+  const audioUrl =
+    input.providerId === 'fal-seedance-reference' && preparedSource?.files?.audio && fs.existsSync(preparedSource.files.audio)
+      ? await uploadFileToFal(fal, preparedSource.files.audio)
+      : '';
+  const request = buildFalRequest(input.providerId, { ...input, preparedSource }, { imageUrl, videoUrl, audioUrl });
+  const result = await fal.subscribe(provider.model, {
+    input: request,
+    logs: true,
+    onQueueUpdate: (update) => {
+      if (Array.isArray(update.logs)) {
+        logs.push(...update.logs.map((log) => truncate(log.message ?? String(log), 240)));
+      }
+    },
+  });
+  const outputUrl = extractFalVideoUrl(result.data);
+  const outputDir = path.join(userDataPath, 'provider-outputs');
+  const outputPath = await downloadProviderOutput(outputUrl, outputDir, input.providerId, result.requestId);
+  const payloadDir = path.join(userDataPath, 'provider-payloads');
+  await fsPromises.mkdir(payloadDir, { recursive: true });
+  const providerPayloadPath = path.join(payloadDir, `${input.providerId}-${result.requestId || Date.now().toString(36)}.json`);
+  await fsPromises.writeFile(
+    providerPayloadPath,
+    JSON.stringify(
+      {
+        createdAt,
+        providerId: input.providerId,
+        providerName: provider.label,
+        model: provider.model,
+        requestId: result.requestId,
+        request,
+        outputUrl,
+        outputPath,
+        preparedSourceRunId: preparedSource?.runId,
+      },
+      null,
+      2,
+    ),
+  );
+
+  return {
+    ok: true,
+    providerId: input.providerId,
+    providerName: provider.label,
+    model: provider.model,
+    status: 'complete',
+    requestId: result.requestId,
+    outputUrl,
+    outputPath,
+    providerPayloadPath,
+    logs: logs.slice(-20),
+    createdAt,
+  };
+}
+
 async function createRenderPacket(input, options = {}) {
   const userDataPath = options.userDataPath || os.tmpdir();
   const packetId = `packet-${Date.now().toString(36)}`;
@@ -548,8 +903,8 @@ async function createRenderPacket(input, options = {}) {
     },
     providerPackets: buildProviderPackets(input),
     nextRequiredSecret:
-      input.providerId === 'pixverse-cloud'
-        ? 'PIXVERSE_API_KEY or FAL_KEY in a secure backend/host environment'
+      ['fal-seedance-reference', 'fal-pixverse-swap'].includes(input.providerId) && !resolveFalKey()
+        ? 'FAL_KEY in the CopyTok macOS Keychain entry or secure environment'
         : input.providerId === 'replicate-cloud'
           ? 'REPLICATE_API_TOKEN in a secure backend/host environment'
           : input.providerId === 'heygen-cloud'
@@ -565,6 +920,8 @@ module.exports = {
   analyzeSourceUrl,
   createRenderPacket,
   getEngineCapabilities,
+  prepareSourceFile,
   prepareSourceUrl,
+  renderWithProvider,
   truncate,
 };

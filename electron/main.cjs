@@ -4,7 +4,9 @@ const {
   analyzeSourceUrl,
   createRenderPacket,
   getEngineCapabilities,
+  prepareSourceFile,
   prepareSourceUrl,
+  renderWithProvider,
 } = require('./engine.cjs');
 
 const isDev = !app.isPackaged;
@@ -59,9 +61,23 @@ app.whenReady().then(() => {
     }),
   );
 
+  ipcMain.handle('studio:prepare-source-file', (_event, filePath) =>
+    prepareSourceFile(filePath, {
+      userDataPath: app.getPath('userData'),
+      appRoot: path.join(__dirname, '..'),
+    }),
+  );
+
   ipcMain.handle('studio:create-render-packet', (_event, input) =>
     createRenderPacket(input, {
       userDataPath: app.getPath('userData'),
+    }),
+  );
+
+  ipcMain.handle('studio:render-with-provider', (_event, input) =>
+    renderWithProvider(input, {
+      userDataPath: app.getPath('userData'),
+      appRoot: path.join(__dirname, '..'),
     }),
   );
 
