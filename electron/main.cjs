@@ -1,3 +1,4 @@
+const { execFile } = require('child_process');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const {
@@ -48,6 +49,11 @@ app.whenReady().then(() => {
       return shell.openExternal(url);
     }
     return false;
+  });
+
+  ipcMain.handle('studio:open-chatgpt-pro', () => {
+    execFile('/usr/bin/open', ['-a', 'Google Chrome', 'https://chatgpt.com/']);
+    return true;
   });
 
   ipcMain.handle('studio:get-engine-capabilities', () => getEngineCapabilities(path.join(__dirname, '..')));

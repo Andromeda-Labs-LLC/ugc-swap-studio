@@ -141,11 +141,9 @@ function App() {
     })
   }
 
-  function generateAvatarStub() {
-    setReferenceFace('generated-avatar-reference.png')
-    setReferenceFacePath('')
-    setReferencePreview(null)
-    setRenderError('Generate-avatar output is not wired to a local image file yet. Upload or save an avatar image before running fal.')
+  async function openAvatarGenerator() {
+    setRenderError('')
+    await window.studioHost?.openChatGPTPro?.()
   }
 
   function handleSourceUrlChange(value: string) {
@@ -357,7 +355,7 @@ function App() {
 
       <section className="hero-flow">
         <p className="micro-label">Local AI UGC workflow</p>
-        <h1>Any avatar. Any action template.</h1>
+        <h1>Clone any social post.</h1>
         <p className="hero-copy">
           Generate a persona, fetch a permitted source post, and route the action clone through your chosen engine.
         </p>
@@ -375,7 +373,7 @@ function App() {
             preview={referencePreview}
             onFile={handleReferenceUpload}
             footer={
-              <button className="ghost-button" type="button" onClick={generateAvatarStub}>
+              <button className="ghost-button" type="button" onClick={openAvatarGenerator}>
                 <WandSparkles size={15} />
                 Generate AI avatar
               </button>

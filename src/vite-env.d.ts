@@ -136,6 +136,7 @@ interface Window {
     getEngineCapabilities: () => Promise<EngineCapabilities>;
     getFilePath: (file: File) => string;
     openExternal: (url: string) => Promise<boolean>;
+    openChatGPTPro: () => Promise<boolean>;
     analyzeSourceUrl: (url: string) => Promise<SourceLinkAnalysis>;
     prepareSourceUrl: (url: string) => Promise<PreparedSource>;
     prepareSourceFile: (filePath: string) => Promise<PreparedSource>;

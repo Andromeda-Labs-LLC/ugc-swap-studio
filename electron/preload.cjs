@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('studioHost', {
   getEngineCapabilities: () => ipcRenderer.invoke('studio:get-engine-capabilities'),
   getFilePath: (file) => webUtils.getPathForFile(file),
   openExternal: (url) => ipcRenderer.invoke('studio:open-external', url),
+  openChatGPTPro: () => ipcRenderer.invoke('studio:open-chatgpt-pro'),
   analyzeSourceUrl: (url) => ipcRenderer.invoke('studio:analyze-source-url', url),
   prepareSourceUrl: (url) => ipcRenderer.invoke('studio:prepare-source-url', url),
   prepareSourceFile: (filePath) => ipcRenderer.invoke('studio:prepare-source-file', filePath),
