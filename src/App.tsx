@@ -35,6 +35,8 @@ import {
   WandSparkles,
 } from 'lucide-react'
 import appIcon from './assets/app-icon.png'
+import snapglpIcon from './assets/snapglp-icon.png'
+import tonecloneIcon from './assets/toneclone-icon.png'
 import './App.css'
 import {
   advanceJob,
@@ -61,7 +63,6 @@ import {
   getFormatCategory,
   getTrendPreset,
   type CampaignAppId,
-  type CampaignRecipe,
   type AvatarRecipe,
   type FormatCategory,
   type FormatCategoryId,
@@ -108,6 +109,11 @@ const navItems = [
   { label: 'Queue', icon: List },
   { label: 'Settings', icon: Settings },
 ]
+
+const campaignIcons: Record<CampaignAppId, string> = {
+  snapglp: snapglpIcon,
+  toneclone: tonecloneIcon,
+}
 
 function App() {
   const [activeNav, setActiveNav] = useState('Projects')
@@ -642,15 +648,10 @@ function App() {
           />
         ) : (
           <>
-            <p className="micro-label">Local AI UGC workflow</p>
-            <h1>Clone any social post.</h1>
-            <p className="hero-copy">
-              Generate a persona, fetch a permitted source post, and route the action clone through your chosen engine.
-            </p>
+            <h1>CopyTok</h1>
 
             <CampaignBoard
               campaignId={campaignId}
-              selectedCampaign={selectedCampaign}
               onCampaignChange={handleCampaignChange}
             />
 
@@ -820,20 +821,13 @@ function App() {
 
 function CampaignBoard({
   campaignId,
-  selectedCampaign,
   onCampaignChange,
 }: {
   campaignId: CampaignAppId
-  selectedCampaign: CampaignRecipe
   onCampaignChange: (campaignId: CampaignAppId) => void
 }) {
   return (
-    <section className="recipe-board" aria-label="Campaign recipe">
-      <div className="recipe-heading">
-        <span>App recipe</span>
-        <strong>{selectedCampaign.name}</strong>
-        <small>{selectedCampaign.oneLineTruth}</small>
-      </div>
+    <section className="recipe-board" aria-label="App recipe">
       <div className="recipe-chip-row">
         {campaignRecipes.map((recipe) => (
           <button
@@ -842,17 +836,12 @@ function CampaignBoard({
             type="button"
             onClick={() => onCampaignChange(recipe.id)}
             style={{ ['--recipe-accent' as string]: recipe.accent }}
+            aria-label={`Use ${recipe.name} recipe`}
           >
-            {recipe.id === 'snapglp' ? <HeartPulse size={18} /> : <AudioWaveform size={18} />}
-            <strong>{recipe.name}</strong>
-            <span>{recipe.defaultQuery}</span>
+            <img src={campaignIcons[recipe.id]} alt="" />
+            <strong>{recipe.id === 'toneclone' ? 'ToneClone' : recipe.name}</strong>
           </button>
         ))}
-      </div>
-      <div className="recipe-facts">
-        <span>{selectedCampaign.tone.slice(0, 3).join(' / ')}</span>
-        <span>{selectedCampaign.approvedCtas[0]}</span>
-        <span>{selectedCampaign.claimBoundaries[0]}</span>
       </div>
     </section>
   )
