@@ -40,7 +40,7 @@ import {
   advanceJob,
   createMockRenderJob,
   downloadManifest,
-  falProviderOptions,
+  generationProviderOptions,
   providerOptions,
   starterJobs,
   type ComplianceState,
@@ -50,6 +50,23 @@ import {
   type RenderPreset,
   type SourceReferenceSummary,
 } from './domain'
+import {
+  avatarsForCampaign,
+  campaignRecipes,
+  captionStyles,
+  formatCategories,
+  generationCountOptions,
+  getCampaignRecipe,
+  getDefaultTrendPreset,
+  getFormatCategory,
+  getTrendPreset,
+  type CampaignAppId,
+  type CampaignRecipe,
+  type AvatarRecipe,
+  type FormatCategory,
+  type FormatCategoryId,
+  type TrendPreset,
+} from './campaigns'
 import {
   engagementPercent,
   formatMetric,
@@ -71,6 +88,8 @@ import {
 const defaultPreset: RenderPreset = {
   resolution: '720p',
   aspectRatio: '9:16',
+  generationCount: 1,
+  captionStyle: 'tiktok-bold',
   watermark: false,
   provenance: true,
   faceRestore: true,
@@ -92,10 +111,23 @@ const navItems = [
 
 function App() {
   const [activeNav, setActiveNav] = useState('Projects')
-  const [providerId, setProviderId] = useState<ProviderId>('fal-seedance-reference')
+  const [providerId, setProviderId] = useState<ProviderId>('direct-seedance-2')
   const [preset, setPreset] = useState<RenderPreset>(defaultPreset)
   const [compliance] = useState<ComplianceState>(defaultCompliance)
   const [jobs, setJobs] = useState<RenderJob[]>(starterJobs)
+  const [campaignId, setCampaignId] = useState<CampaignAppId>('snapglp')
+  const [formatCategoryId, setFormatCategoryId] = useState<FormatCategoryId>('reaction-hook')
+  const [trendPresetId, setTrendPresetId] = useState('reaction-overwhelmed-fridge')
+  const [avatarSelections, setAvatarSelections] = useState<string[]>([
+    'uploaded-first-frame',
+    'calm-food-guide',
+    'busy-parent-kitchen',
+  ])
+  const [avatarSlotFiles, setAvatarSlotFiles] = useState<Array<{ name: string; path: string; preview: string | null }>>([
+    { name: '', path: '', preview: null },
+    { name: '', path: '', preview: null },
+    { name: '', path: '', preview: null },
+  ])
   const [referenceFace, setReferenceFace] = useState('')
   const [sourceVideo, setSourceVideo] = useState('')
   const [referenceFacePath, setReferenceFacePath] = useState('')
@@ -145,18 +177,97 @@ function App() {
     () => providerOptions.find((provider) => provider.id === providerId) ?? providerOptions[0],
     [providerId],
   )
+  const selectedCampaign = useMemo(() => getCampaignRecipe(campaignId), [campaignId])
+  const selectedFormat = useMemo(() => getFormatCategory(formatCategoryId), [formatCategoryId])
+  const selectedTrendPreset = useMemo(
+    () => getTrendPreset(formatCategoryId, trendPresetId),
+    [formatCategoryId, trendPresetId],
+  )
+  const campaignAvatars = useMemo(() => avatarsForCampaign(campaignId), [campaignId])
 
   const activeJob = jobs[0]
   const sourceLabel = sourceVideo || sourceAnalysis?.title || sourceUrl
   const readyToRender =
-    Boolean(referenceFacePath) &&
+    avatarSlotFiles.slice(0, preset.generationCount).every((slot, index) => Boolean(slot.path || (index === 0 && referenceFacePath))) &&
     Boolean(sourceVideoPath || (sourceUrl && sourceAnalysis?.ok))
+  const selectedAvatarSlots = useMemo(
+    () =>
+      avatarSelections.slice(0, preset.generationCount).map((avatarId, index) => {
+        const recipe = campaignAvatars.find((avatar) => avatar.id === avatarId) ?? campaignAvatars[0]
+        const file = avatarSlotFiles[index]
+        return {
+          slot: index + 1,
+          avatarId,
+          avatarName: recipe?.name ?? avatarId,
+          avatarStyle: recipe?.style ?? '',
+          avatarPrompt: recipe?.prompt ?? '',
+          usageNote: recipe?.usageNote ?? '',
+          localImageName: file?.name || (index === 0 ? referenceFace : ''),
+          localImagePath: file?.path || (index === 0 ? referenceFacePath : ''),
+        }
+      }),
+    [avatarSelections, avatarSlotFiles, campaignAvatars, preset.generationCount, referenceFace, referenceFacePath],
+  )
   const sortedTrendPosts = useMemo(
     () => sortTrendPosts((trendResult?.posts ?? []) as TrendPost[], trendSort),
     [trendResult, trendSort],
   )
   const selectedTrendPost =
     sortedTrendPosts.find((post) => post.id === selectedTrendPostId) ?? sortedTrendPosts[0] ?? null
+
+  function handleCampaignChange(nextCampaignId: CampaignAppId) {
+    const recipe = getCampaignRecipe(nextCampaignId)
+    setCampaignId(nextCampaignId)
+    setFormatCategoryId(recipe.defaultFormatId)
+    setTrendPresetId(recipe.defaultTrendPresetId)
+    setTrendProfileId(nextCampaignId)
+    setTrendQuery(profileQueryValue(nextCampaignId))
+    setAvatarSelections((current) => {
+      const allowed = avatarsForCampaign(nextCampaignId)
+      return [0, 1, 2].map((slot) => current[slot] && allowed.some((avatar) => avatar.id === current[slot])
+        ? current[slot]
+        : allowed[Math.min(slot, allowed.length - 1)]?.id ?? 'uploaded-first-frame')
+    })
+  }
+
+  function handleFormatChange(nextFormatId: FormatCategoryId) {
+    setFormatCategoryId(nextFormatId)
+    setTrendPresetId(getDefaultTrendPreset(nextFormatId).id)
+  }
+
+  function handleGenerationCount(nextCount: 1 | 2 | 3) {
+    setPreset((current) => ({ ...current, generationCount: nextCount }))
+  }
+
+  function handleAvatarSelection(slot: number, avatarId: string) {
+    setAvatarSelections((current) => current.map((value, index) => (index === slot ? avatarId : value)))
+  }
+
+  function handleAvatarSlotFile(slot: number, fileList: FileList | null) {
+    const file = fileList?.[0]
+    if (!file) return
+    const localPath = desktopFilePath(file)
+    setAvatarSlotFiles((current) =>
+      current.map((value, index) => {
+        if (index !== slot) return value
+        if (value.preview) URL.revokeObjectURL(value.preview)
+        return {
+          name: file.name,
+          path: localPath,
+          preview: URL.createObjectURL(file),
+        }
+      }),
+    )
+    if (slot === 0) {
+      setReferenceFace(file.name)
+      setReferenceFacePath(localPath)
+      setReferencePreview((existingPreview) => {
+        if (existingPreview) URL.revokeObjectURL(existingPreview)
+        return URL.createObjectURL(file)
+      })
+    }
+    setRenderError('')
+  }
 
   function refreshTrendStatus() {
     window.studioHost?.getTrendScoutStatus?.().then(setTrendStatus).catch(() => setTrendStatus(null))
@@ -243,7 +354,19 @@ function App() {
     const file = fileList?.[0]
     if (!file) return
     setReferenceFace(file.name)
-    setReferenceFacePath(desktopFilePath(file))
+    const localPath = desktopFilePath(file)
+    setReferenceFacePath(localPath)
+    setAvatarSlotFiles((current) =>
+      current.map((value, index) => {
+        if (index !== 0) return value
+        if (value.preview) URL.revokeObjectURL(value.preview)
+        return {
+          name: file.name,
+          path: localPath,
+          preview: URL.createObjectURL(file),
+        }
+      }),
+    )
     setRenderError('')
     setReferencePreview((existingPreview) => {
       if (existingPreview) URL.revokeObjectURL(existingPreview)
@@ -368,7 +491,7 @@ function App() {
     setProviderResult(null)
     try {
       if (!referenceFacePath) {
-        throw new Error('Upload a saved avatar image before running fal. Generated avatar stubs are not files yet.')
+        throw new Error('Upload or select a first-frame avatar image before rendering. Generated avatar stubs are not local image files yet.')
       }
 
       const prepared =
@@ -386,6 +509,11 @@ function App() {
         window.studioHost?.createRenderPacket
           ? await window.studioHost.createRenderPacket({
               providerId,
+              campaign: selectedCampaign,
+              formatCategory: selectedFormat,
+              trendPreset: selectedTrendPreset,
+              avatars: avatarSelections.slice(0, preset.generationCount),
+              avatarSlots: selectedAvatarSlots,
               referenceFace,
               referenceFacePath,
               sourceVideo: sourceLabel,
@@ -416,13 +544,18 @@ function App() {
       }
 
       let providerRender: ProviderRenderResult | undefined
-      if (providerId === 'fal-seedance-reference' || providerId === 'fal-pixverse-swap') {
+      if (providerId !== 'mock-local') {
         if (!window.studioHost?.renderWithProvider) {
-          throw new Error('This CopyTok build does not expose the fal render adapter yet.')
+          throw new Error('This CopyTok build does not expose the provider render adapter yet.')
         }
         setIsRenderingProvider(true)
         providerRender = await window.studioHost.renderWithProvider({
           providerId,
+          campaign: selectedCampaign,
+          formatCategory: selectedFormat,
+          trendPreset: selectedTrendPreset,
+          avatars: avatarSelections.slice(0, preset.generationCount),
+          avatarSlots: selectedAvatarSlots,
           referenceFace,
           referenceFacePath,
           sourceVideo: sourceLabel,
@@ -515,12 +648,27 @@ function App() {
               Generate a persona, fetch a permitted source post, and route the action clone through your chosen engine.
             </p>
 
+            <CampaignBoard
+              campaignId={campaignId}
+              selectedCampaign={selectedCampaign}
+              onCampaignChange={handleCampaignChange}
+            />
+
+            <FormatPicker
+              selectedFormat={selectedFormat}
+              selectedTrendPreset={selectedTrendPreset}
+              formatCategoryId={formatCategoryId}
+              trendPresetId={trendPresetId}
+              onFormatChange={handleFormatChange}
+              onTrendPresetChange={setTrendPresetId}
+            />
+
             <section className="swap-cards" aria-label="Swap inputs">
               <UploadCard
                 accent="teal"
                 title="Avatar photo"
-                subtitle="Upload or generate the face you want in the video"
-                dropLabel="Drop image here"
+                subtitle="Upload the first-frame avatar image that anchors the render"
+                dropLabel="Drop first-frame image here"
                 dropMeta="PNG, JPG up to 20MB"
                 accept="image/*"
                 icon={<Image size={24} />}
@@ -584,6 +732,17 @@ function App() {
               onPrepare={prepareSourceLink}
             />
 
+            <GenerationPlanner
+              preset={preset}
+              avatarSelections={avatarSelections}
+              avatarSlotFiles={avatarSlotFiles}
+              campaignAvatars={campaignAvatars}
+              onGenerationCountChange={handleGenerationCount}
+              onAvatarChange={handleAvatarSelection}
+              onAvatarFile={handleAvatarSlotFile}
+              onPresetChange={setPreset}
+            />
+
             <section className="control-panel" aria-label="Render controls">
               <div className="provider-block">
                 <ProviderChips
@@ -622,10 +781,12 @@ function App() {
               >
                 <Sparkles size={18} />
                 {isRenderingProvider
-                  ? 'Rendering on fal'
+                  ? 'Rendering'
                   : isPreparingSource || isCreatingPacket
                     ? 'Preparing Engine Packet'
-                    : 'Generate Swap'}
+                    : preset.generationCount > 1
+                      ? `Generate ${preset.generationCount} Videos`
+                      : 'Generate Video'}
               </button>
               {!readyToRender && (
                 <p className="render-hint">
@@ -654,6 +815,176 @@ function App() {
         )}
       </section>
     </main>
+  )
+}
+
+function CampaignBoard({
+  campaignId,
+  selectedCampaign,
+  onCampaignChange,
+}: {
+  campaignId: CampaignAppId
+  selectedCampaign: CampaignRecipe
+  onCampaignChange: (campaignId: CampaignAppId) => void
+}) {
+  return (
+    <section className="recipe-board" aria-label="Campaign recipe">
+      <div className="recipe-heading">
+        <span>App recipe</span>
+        <strong>{selectedCampaign.name}</strong>
+        <small>{selectedCampaign.oneLineTruth}</small>
+      </div>
+      <div className="recipe-chip-row">
+        {campaignRecipes.map((recipe) => (
+          <button
+            key={recipe.id}
+            className={campaignId === recipe.id ? 'selected' : ''}
+            type="button"
+            onClick={() => onCampaignChange(recipe.id)}
+            style={{ ['--recipe-accent' as string]: recipe.accent }}
+          >
+            {recipe.id === 'snapglp' ? <HeartPulse size={18} /> : <AudioWaveform size={18} />}
+            <strong>{recipe.name}</strong>
+            <span>{recipe.defaultQuery}</span>
+          </button>
+        ))}
+      </div>
+      <div className="recipe-facts">
+        <span>{selectedCampaign.tone.slice(0, 3).join(' / ')}</span>
+        <span>{selectedCampaign.approvedCtas[0]}</span>
+        <span>{selectedCampaign.claimBoundaries[0]}</span>
+      </div>
+    </section>
+  )
+}
+
+function FormatPicker({
+  selectedFormat,
+  selectedTrendPreset,
+  formatCategoryId,
+  trendPresetId,
+  onFormatChange,
+  onTrendPresetChange,
+}: {
+  selectedFormat: FormatCategory
+  selectedTrendPreset: TrendPreset
+  formatCategoryId: FormatCategoryId
+  trendPresetId: string
+  onFormatChange: (formatId: FormatCategoryId) => void
+  onTrendPresetChange: (trendPresetId: string) => void
+}) {
+  return (
+    <section className="format-picker" aria-label="Format and saved trend">
+      <div className="format-column">
+        <span>Format category</span>
+        <div className="format-grid">
+          {formatCategories.map((format) => (
+            <button
+              key={format.id}
+              type="button"
+              className={formatCategoryId === format.id ? 'selected' : ''}
+              onClick={() => onFormatChange(format.id)}
+              title={format.bestFor}
+            >
+              <strong>{format.name}</strong>
+              <small>{format.summary}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="trend-column">
+        <span>Saved trend</span>
+        <select value={trendPresetId} onChange={(event) => onTrendPresetChange(event.target.value)}>
+          {selectedFormat.trendPresets.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.name}
+            </option>
+          ))}
+        </select>
+        <div className="trend-preset-card">
+          <strong>{selectedTrendPreset.firstThreeSeconds}</strong>
+          <span>{selectedTrendPreset.visualBehavior}</span>
+          <small>{selectedTrendPreset.musicNote}</small>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function GenerationPlanner({
+  preset,
+  avatarSelections,
+  avatarSlotFiles,
+  campaignAvatars,
+  onGenerationCountChange,
+  onAvatarChange,
+  onAvatarFile,
+  onPresetChange,
+}: {
+  preset: RenderPreset
+  avatarSelections: string[]
+  avatarSlotFiles: Array<{ name: string; path: string; preview: string | null }>
+  campaignAvatars: AvatarRecipe[]
+  onGenerationCountChange: (count: 1 | 2 | 3) => void
+  onAvatarChange: (slot: number, avatarId: string) => void
+  onAvatarFile: (slot: number, files: FileList | null) => void
+  onPresetChange: (updater: (current: RenderPreset) => RenderPreset) => void
+}) {
+  return (
+    <section className="generation-planner" aria-label="Batch and caption planning">
+      <div className="planner-block">
+        <span>Batch</span>
+        <SegmentedControl
+          options={generationCountOptions.map(String)}
+          value={String(preset.generationCount)}
+          onChange={(value) => onGenerationCountChange(Number(value) as 1 | 2 | 3)}
+        />
+        <small>Generate one, two, or three avatar variants from the same format.</small>
+      </div>
+      <div className="planner-block avatar-slots">
+        <span>Avatar library</span>
+        {[0, 1, 2].slice(0, preset.generationCount).map((slot) => (
+          <div className="avatar-slot-card" key={slot}>
+            <label>
+              <small>Video {slot + 1}</small>
+              <select value={avatarSelections[slot]} onChange={(event) => onAvatarChange(slot, event.target.value)}>
+                {campaignAvatars.map((avatar) => (
+                  <option key={avatar.id} value={avatar.id}>
+                    {avatar.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={avatarSlotFiles[slot]?.preview ? 'avatar-file has-file' : 'avatar-file'}>
+              <input type="file" accept="image/*" onChange={(event) => onAvatarFile(slot, event.target.files)} />
+              {avatarSlotFiles[slot]?.preview ? (
+                <img src={avatarSlotFiles[slot]?.preview ?? ''} alt="" />
+              ) : (
+                <Image size={15} />
+              )}
+              <span>{avatarSlotFiles[slot]?.name || 'Attach first-frame'}</span>
+            </label>
+          </div>
+        ))}
+      </div>
+      <div className="planner-block">
+        <span>Captions</span>
+        <select
+          value={preset.captionStyle}
+          onChange={(event) =>
+            onPresetChange((current) => ({ ...current, captionStyle: event.target.value as RenderPreset['captionStyle'] }))
+          }
+        >
+          <option value="none">No burned captions</option>
+          {captionStyles.map((style) => (
+            <option key={style.id} value={style.id}>
+              {style.name}
+            </option>
+          ))}
+        </select>
+        <small>{captionStyles.find((style) => style.id === preset.captionStyle)?.burnInRole ?? 'Export a clean render only.'}</small>
+      </div>
+    </section>
   )
 }
 
@@ -722,24 +1053,42 @@ function ProviderChips({
   onChange: (providerId: ProviderId) => void
 }) {
   return (
-    <div className="provider-chips" aria-label="fal provider">
+    <div className="provider-chips" aria-label="Generation provider">
       <span>PROVIDER</span>
       <div>
-        {falProviderOptions.map((provider) => {
+        {generationProviderOptions.map((provider) => {
           const Icon = provider.icon
           const capability = capabilities?.providers.find((item) => item.id === provider.id)
           const missingSecret = capability?.status === 'missing-secret'
+          const statusLabel =
+            missingSecret
+              ? `Needs ${capability?.secretEnv || 'key'}`
+              : capability?.status === 'needs-config'
+                ? 'Needs config'
+                : capability?.status === 'cli-ready'
+                  ? 'CLI ready'
+              : capability?.status === 'adapter-ready'
+                ? 'Ready'
+                : provider.id === 'openai-image-2'
+                  ? 'Still images'
+                  : provider.id === 'direct-kling-3'
+                    ? 'Direct API'
+                    : provider.id === 'direct-seedance-2'
+                      ? 'Direct API'
+                      : provider.id === 'heygen-cloud'
+                        ? 'Talking head'
+                        : 'Fast swap'
           return (
             <button
               key={provider.id}
               className={providerId === provider.id ? 'selected' : ''}
               type="button"
-              title={missingSecret ? 'FAL_KEY is missing from the CopyTok Keychain.' : provider.bestFor}
+              title={missingSecret ? `${capability?.secretEnv || 'Provider key'} is missing from the CopyTok Keychain.` : provider.bestFor}
               onClick={() => onChange(provider.id)}
             >
               <Icon size={15} />
               <strong>{provider.shortName}</strong>
-              <small>{missingSecret ? 'Needs key' : provider.id === 'fal-seedance-reference' ? 'Best quality' : 'Fast swap'}</small>
+              <small>{statusLabel}</small>
             </button>
           )
         })}

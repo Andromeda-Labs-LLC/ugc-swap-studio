@@ -1,73 +1,57 @@
-# Provider Routing Assessment
+# Provider Routing
 
-## Recommendation
+CopyTok uses a direct-first provider strategy:
 
-Use a provider-neutral routing layer first. Keep the UI stable and swap the video engine behind it.
+1. Prefer the cheapest direct provider API when the vendor account exposes a clear upload, submit, poll, and download contract.
+2. Use fal/PixVerse as the immediately usable fallback for one-click swap testing because the local Mac already has a working `FAL_KEY`.
+3. Use HeyGen through the authenticated HeyGen CLI for talking-head and presenter clips.
+4. Use OpenAI GPT Image 2 only for still assets, first-frame keyframes, carousel images, and avatar source images.
+5. Keep FFmpeg as the invisible finishing engine after provider generation.
 
-For Andromeda Labs, the best near-term provider path is:
+Renderer UI code never calls provider APIs directly. Secrets live in the macOS Keychain, shell environment, vendor CLI auth, or future backend secret stores.
 
-1. **Pixverse-style video swap API if stable API access is available**
-   - Best conceptual match for the SwapTok-style workflow: source video plus reference identity/image.
-   - Likely strongest fit for short-form face-swap variants.
-   - Main risk: public API availability, terms, cost, latency, and commercial-use clarity.
+## Current Provider Lanes
 
-2. **HeyGen for talking-avatar UGC**
-   - Strong fit when the source asset is a presenter/ad read rather than a viral-template swap.
-   - Better for scripted founder/creator style clips, avatar workflows, and consistent brand-safe talking heads.
-   - Not a perfect replacement for arbitrary source-video face swapping.
+| UI chip | Backend route | Current status | Use |
+| --- | --- | --- | --- |
+| Seedance | `direct-seedance-2` | Packet/config-ready; needs BytePlus/Seedance credentials and exact endpoint config | High-quality multimodal video when direct pricing beats middlemen |
+| Kling | `direct-kling-3` | Packet/config-ready; needs Kling credentials and exact task endpoint config | Direct image-to-video from first-frame avatar stills |
+| PixVerse | `fal-pixverse-swap` | Live through fal | Fast source-video/person-swap testing |
+| HeyGen | `heygen-cloud` | Live through authenticated HeyGen CLI when CLI auth is valid | Talking-head UGC and presenter videos |
+| Image | `openai-image-2` | Live only when `OPENAI_API_KEY` exists; otherwise use ChatGPT Pro manually | High-quality still images and first-frame assets |
 
-3. **Replicate as an experimentation router**
-   - Good when we need quick access to hosted open models.
-   - Useful for comparing quality and speed before committing.
-   - Requires careful review of each model license and output policy.
+## Keychain Accounts
 
-4. **Local FaceFusion worker**
-   - Best privacy posture.
-   - Good for internal experiments and owned media.
-   - Main risks: model licensing, local GPU speed, output quality, and setup complexity.
+Use service `CopyTok`.
 
-5. **Runway/Pika/Luma-style video APIs**
-   - Better for text/image-to-video generation and stylized ad assets.
-   - Less direct for identity-preserving face swap unless their API exposes the exact needed workflow.
+```text
+FAL_KEY
+APIFY_TOKEN
+KLING_API_KEY
+KLING_CREATE_URL
+KLING_STATUS_URL_TEMPLATE
+SEEDANCE_API_KEY
+SEEDANCE_API_BASE_URL
+SEEDANCE_CREATE_URL
+SEEDANCE_STATUS_URL_TEMPLATE
+BYTEPLUS_API_KEY
+OPENAI_API_KEY
+```
 
-## Adapter Requirements
+HeyGen is currently authenticated through the local `heygen` CLI, so no raw HeyGen key is required for the app path.
 
-Each provider adapter should implement:
+## Batch Variants
 
-- Accept a normalized source-link analysis payload when the user uses a URL instead of a local video file.
-- Accept a prepared-source payload with local normalized MP4 path, audio path, media probe data, and transcript status.
-- Create job.
-- Poll status.
-- Fetch output.
-- Normalize errors.
-- Emit cost/latency metadata.
-- Attach a guardrail/provenance manifest.
+CopyTok supports one, two, or three render variants per job. Each variant must have a real first-frame avatar image for video providers. Prompt-only avatar recipes are creative presets, not renderable files, until the generated still is saved and attached.
 
-No provider key should ever be present in React code, screenshots, committed files, or public docs.
+## Direct Provider Rule
 
-## Decision Criteria
+Do not silently fall back from direct Kling or direct Seedance to fal. If direct credentials or endpoint config are missing, the app should save a provider packet and return a blocked result with the missing item named clearly.
 
-- Can it accept a reference face/image and source video?
-- Can it accept source metadata, captions/transcript, and action timing from a URL analyzer?
-- Does it preserve motion, audio, framing, and timing?
-- Does voice or retained source audio require separate consent, licensing, or provider-side policy checks?
-- Does the license permit Andromeda marketing use?
-- Does it support commercial output?
-- Is latency acceptable for batch creative testing?
-- Is pricing predictable enough for repeated variants?
-- Can outputs be labeled/provenance-tagged?
-- Can we delete input/output assets?
+## FFmpeg Finish
 
-## Current Product Stance
+Provider output is not the final marketing asset. The render packet includes an FFmpeg finish plan with hard-cut rules, caption style, export target, and campaign output folder under:
 
-The v0.1 app ships with a mock provider only. This is intentional. It keeps the workflow usable and testable without prematurely committing to vendor terms, model licenses, or secret-bearing code paths.
-
-## Current Adapter Packets
-
-The Electron host can now write provider-ready packets for:
-
-- `fal-ai/pixverse/swap`
-- direct PixVerse swap placeholder
-- local face-swap lab placeholder
-
-The packets intentionally contain placeholders for uploaded asset URLs. A future secure adapter should upload the prepared avatar/source assets to approved storage, replace those placeholders, then call the provider with secrets stored outside React and outside the repository.
+```text
+/Volumes/Adventure/Andromeda Labs/Marketing/CopyTok
+```

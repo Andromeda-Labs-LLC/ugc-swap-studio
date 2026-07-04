@@ -4,13 +4,18 @@ import {
   Boxes,
   BrainCircuit,
   Clapperboard,
+  Flame,
   Film,
+  ImagePlus,
   Laptop,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
 
 export type ProviderId =
+  | 'direct-seedance-2'
+  | 'direct-kling-3'
+  | 'openai-image-2'
   | 'fal-seedance-reference'
   | 'fal-pixverse-swap'
   | 'mock-local'
@@ -42,12 +47,23 @@ export interface ProviderRenderResult {
   providerPayloadPath?: string
   error?: string
   logs?: string[]
+  variants?: Array<{
+    slot: number
+    avatarName: string
+    requestId?: string
+    outputUrl?: string
+    outputPath?: string
+    status: 'complete' | 'blocked'
+    error?: string
+  }>
   createdAt: string
 }
 
 export interface RenderPreset {
   resolution: '720p' | '1080p'
   aspectRatio: '9:16' | '1:1' | '16:9'
+  generationCount: 1 | 2 | 3
+  captionStyle: 'none' | 'tiktok-bold' | 'karaoke' | 'clean-minimal' | 'high-contrast' | 'creator-bubble' | 'lower-third' | 'big-hook'
   watermark: boolean
   provenance: boolean
   faceRestore: boolean
@@ -97,6 +113,33 @@ export interface RenderJob {
 }
 
 export const providerOptions: ProviderOption[] = [
+  {
+    id: 'direct-seedance-2',
+    name: 'Direct Seedance 2.0',
+    shortName: 'Seedance',
+    mode: 'Cloud',
+    icon: Sparkles,
+    bestFor: 'Cost-first direct Seedance route when BytePlus/ModelArk credentials are configured.',
+    status: 'Recommended candidate',
+  },
+  {
+    id: 'direct-kling-3',
+    name: 'Direct Kling 3.0',
+    shortName: 'Kling',
+    mode: 'Cloud',
+    icon: Flame,
+    bestFor: 'Cheaper direct image-to-video route for first-frame avatar motion and short reaction hooks.',
+    status: 'Recommended candidate',
+  },
+  {
+    id: 'openai-image-2',
+    name: 'OpenAI GPT Image 2',
+    shortName: 'Image',
+    mode: 'Cloud',
+    icon: ImagePlus,
+    bestFor: 'Highest-quality still images, first-frame keyframes, ad images, and carousel slides.',
+    status: 'Recommended candidate',
+  },
   {
     id: 'fal-seedance-reference',
     name: 'fal Seedance 2.0 Reference',
@@ -153,8 +196,14 @@ export const providerOptions: ProviderOption[] = [
   },
 ]
 
-export const falProviderOptions = providerOptions.filter((provider) =>
-  ['fal-seedance-reference', 'fal-pixverse-swap'].includes(provider.id),
+export const generationProviderOptions = providerOptions.filter((provider) =>
+  [
+    'direct-seedance-2',
+    'direct-kling-3',
+    'fal-pixverse-swap',
+    'heygen-cloud',
+    'openai-image-2',
+  ].includes(provider.id),
 )
 
 export const starterJobs: RenderJob[] = [
@@ -171,6 +220,8 @@ export const starterJobs: RenderJob[] = [
     preset: {
       resolution: '720p',
       aspectRatio: '9:16',
+      generationCount: 1,
+      captionStyle: 'tiktok-bold',
       watermark: false,
       provenance: true,
       faceRestore: true,

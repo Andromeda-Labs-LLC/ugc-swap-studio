@@ -19,7 +19,7 @@ interface EngineToolState {
 interface EngineProviderState {
   id: string;
   label: string;
-  status: 'adapter-ready' | 'evaluation-only' | 'missing-secret';
+  status: 'adapter-ready' | 'cli-ready' | 'needs-config' | 'evaluation-only' | 'missing-secret';
   secretEnv: string;
   role: string;
 }
@@ -102,6 +102,9 @@ interface PreparedSource {
 interface ProviderRenderResult {
   ok: boolean;
   providerId:
+    | 'direct-seedance-2'
+    | 'direct-kling-3'
+    | 'openai-image-2'
     | 'fal-seedance-reference'
     | 'fal-pixverse-swap'
     | 'mock-local'
@@ -117,6 +120,15 @@ interface ProviderRenderResult {
   providerPayloadPath?: string;
   error?: string;
   logs?: string[];
+  variants?: Array<{
+    slot: number;
+    avatarName: string;
+    requestId?: string;
+    outputUrl?: string;
+    outputPath?: string;
+    status: 'complete' | 'blocked';
+    error?: string;
+  }>;
   createdAt: string;
 }
 

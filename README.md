@@ -1,27 +1,32 @@
 # CopyTok
 
-CopyTok is a self-hosted desktop workflow app for creating AI-assisted UGC video variants from owned, licensed, generated, or explicitly permitted source posts. It is designed for small marketing teams that need a simple local queue, explicit rights checks, source-link analysis, and a clean adapter boundary for future video-generation providers.
+CopyTok is a self-hosted desktop workflow app for researching, cloning, and generating AI-assisted UGC variants from owned, licensed, generated, or explicitly permitted source posts. It is designed for Andromeda Labs marketing work: scout a proven format, attach first-frame avatars, choose a provider, and produce campaign-specific creative quickly.
 
 This project is a clean-room workflow clone of public-facing face-swap creator tools. It does not copy private code, private APIs, visual assets, or brand identity from any third-party product.
 
 ## Current v0.1 Scope
 
 - Electron + React desktop app for macOS.
-- Local project shell with reference-face and source-video intake.
+- Local project shell with first-frame avatar and source-video intake.
 - Source-link analysis for permitted TikTok, Instagram, YouTube Shorts, and other URLs supported by `yt-dlp`.
 - Source-link preparation that clips, downloads, normalizes, and inspects the reference video.
-- Provider-ready render packet generation for fal/PixVerse-style adapters.
+- Campaign recipes for SnapGLP and Tone Clone.
+- Saved trend-format presets, including reaction hooks, talking heads, faceless demos, carousels, rankings, tutorials, before/after, objection-bust, POV, and app showcase formats.
+- One-, two-, or three-variant generation planning with per-variant avatar image attachment.
+- Provider-ready render packet generation for direct Seedance, direct Kling, fal/PixVerse, HeyGen, OpenAI GPT Image 2, and local evaluation adapters.
 - Caption/transcript extraction when source captions are available.
 - Local Whisper transcript fallback when `whisper.cpp` and a model are available.
 - Audio/voice readiness reporting with consent warnings.
 - Trend Scout module for app-specific TikTok format discovery, ranking, and adaptation briefs.
-- Rights, consent, and AI-disclosure guardrail checks.
 - Provider-neutral render routing.
-- Mock local renderer that simulates queue progress.
+- Live fal/PixVerse route when `FAL_KEY` is present.
+- HeyGen Video Agent route through the authenticated local `heygen` CLI.
+- OpenAI GPT Image 2 high-quality still route when `OPENAI_API_KEY` is present.
+- Direct Seedance and direct Kling packet routes that block clearly until direct vendor credentials and endpoint config are installed.
 - Job history, audit trail, preview area, and downloadable job manifest.
-- Adapter slots for FaceFusion local, Pixverse cloud, HeyGen cloud, and Replicate-hosted model routing.
+- FFmpeg finish-plan generation for hard-cut MP4 exports under the Adventure marketing tree.
 
-The app does not yet perform real face swaps. The first release proves the workflow, UX, source ingest, and provider architecture before secrets or external APIs are wired in.
+The immediately executable video-swap path is fal/PixVerse because the local Mac has a working fal key. Direct Kling and Seedance are intentionally direct-only: they do not silently fall back to a middleman when direct credentials are missing.
 
 ## Run Locally
 
@@ -56,6 +61,14 @@ Renderer UI code should never call vendor APIs directly. Add real video provider
 See [docs/provider-routing.md](docs/provider-routing.md).
 See [docs/engine-harness.md](docs/engine-harness.md).
 See [docs/trend-scout.md](docs/trend-scout.md).
+
+## Local Output Root
+
+Campaign packets, generated outputs, avatar-library assets, and format presets are organized under:
+
+```text
+/Volumes/Adventure/Andromeda Labs/Marketing/CopyTok
+```
 
 ## Guardrails
 

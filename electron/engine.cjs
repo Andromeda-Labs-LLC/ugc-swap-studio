@@ -7,12 +7,26 @@ const path = require('path');
 const DEFAULT_TIMEOUT_MS = 90000;
 const MAX_BUFFER = 1024 * 1024 * 12;
 const MAX_SOURCE_SECONDS = 15;
-const FAL_KEYCHAIN_SERVICE = 'CopyTok';
+const COPYTOK_KEYCHAIN_SERVICE = 'CopyTok';
+const FAL_KEYCHAIN_SERVICE = COPYTOK_KEYCHAIN_SERVICE;
 const FAL_KEYCHAIN_ACCOUNT = 'FAL_KEY';
-const APIFY_KEYCHAIN_SERVICE = 'CopyTok';
+const APIFY_KEYCHAIN_SERVICE = COPYTOK_KEYCHAIN_SERVICE;
 const APIFY_KEYCHAIN_ACCOUNT = 'APIFY_TOKEN';
 const ADVENTURE_PROJECT_ROOT = '/Volumes/Adventure/Andromeda Labs/SaaS/UGC Swap Studio';
+const MARKETING_OUTPUT_ROOT = '/Volumes/Adventure/Andromeda Labs/Marketing/CopyTok';
 const SCOUT_DB_VERSION = 1;
+
+const PROVIDER_SECRETS = {
+  klingApiKey: 'KLING_API_KEY',
+  klingCreateUrl: 'KLING_CREATE_URL',
+  klingStatusUrlTemplate: 'KLING_STATUS_URL_TEMPLATE',
+  seedanceApiKey: 'SEEDANCE_API_KEY',
+  seedanceBaseUrl: 'SEEDANCE_API_BASE_URL',
+  seedanceCreateUrl: 'SEEDANCE_CREATE_URL',
+  seedanceStatusUrlTemplate: 'SEEDANCE_STATUS_URL_TEMPLATE',
+  byteplusApiKey: 'BYTEPLUS_API_KEY',
+  openAiApiKey: 'OPENAI_API_KEY',
+};
 
 const TREND_APP_PROFILES = {
   snapglp: {
@@ -106,6 +120,14 @@ function readKeychainSecret(service, account) {
   return result.status === 0 ? result.stdout.trim() : '';
 }
 
+function resolveSecret(account) {
+  return process.env[account] || readKeychainSecret(COPYTOK_KEYCHAIN_SERVICE, account);
+}
+
+function hasSecret(account) {
+  return Boolean(resolveSecret(account));
+}
+
 function resolveFalKey() {
   return process.env.FAL_KEY || readKeychainSecret(FAL_KEYCHAIN_SERVICE, FAL_KEYCHAIN_ACCOUNT);
 }
@@ -116,6 +138,62 @@ function resolveApifyToken() {
 
 function falSecretStatus() {
   return resolveFalKey() ? 'adapter-ready' : 'missing-secret';
+}
+
+function resolveHeygenCli() {
+  const found = spawnSync('/bin/sh', ['-lc', 'command -v heygen'], { encoding: 'utf8' });
+  return found.status === 0 ? found.stdout.trim() : '';
+}
+
+function heygenCliStatus() {
+  const cliPath = resolveHeygenCli();
+  if (!cliPath) return 'missing-secret';
+  const result = spawnSync(cliPath, ['auth', 'status'], { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+  return result.status === 0 ? 'cli-ready' : 'missing-secret';
+}
+
+function directKlingStatus() {
+  if (!hasSecret(PROVIDER_SECRETS.klingApiKey)) return 'missing-secret';
+  return hasSecret(PROVIDER_SECRETS.klingCreateUrl) ? 'adapter-ready' : 'needs-config';
+}
+
+function directSeedanceStatus() {
+  if (!hasSecret(PROVIDER_SECRETS.seedanceApiKey) && !hasSecret(PROVIDER_SECRETS.byteplusApiKey)) {
+    return 'missing-secret';
+  }
+  return hasSecret(PROVIDER_SECRETS.seedanceCreateUrl) || hasSecret(PROVIDER_SECRETS.seedanceBaseUrl)
+    ? 'adapter-ready'
+    : 'needs-config';
+}
+
+function openAiImageStatus() {
+  return hasSecret(PROVIDER_SECRETS.openAiApiKey) ? 'adapter-ready' : 'missing-secret';
+}
+
+function nextRequiredSecretForProvider(providerId) {
+  if (['fal-seedance-reference', 'fal-pixverse-swap'].includes(providerId) && !resolveFalKey()) {
+    return 'FAL_KEY in the CopyTok macOS Keychain entry or secure environment';
+  }
+  if (providerId === 'direct-kling-3') {
+    if (!hasSecret(PROVIDER_SECRETS.klingApiKey)) return 'KLING_API_KEY in the CopyTok macOS Keychain entry';
+    if (!hasSecret(PROVIDER_SECRETS.klingCreateUrl)) return 'KLING_CREATE_URL for the direct Kling image-to-video task endpoint';
+  }
+  if (providerId === 'direct-seedance-2') {
+    if (!hasSecret(PROVIDER_SECRETS.seedanceApiKey) && !hasSecret(PROVIDER_SECRETS.byteplusApiKey)) {
+      return 'SEEDANCE_API_KEY or BYTEPLUS_API_KEY in the CopyTok macOS Keychain entry';
+    }
+    if (!hasSecret(PROVIDER_SECRETS.seedanceCreateUrl) && !hasSecret(PROVIDER_SECRETS.seedanceBaseUrl)) {
+      return 'SEEDANCE_CREATE_URL or SEEDANCE_API_BASE_URL for BytePlus ModelArk video generation';
+    }
+  }
+  if (providerId === 'openai-image-2' && !hasSecret(PROVIDER_SECRETS.openAiApiKey)) {
+    return 'OPENAI_API_KEY for in-app GPT Image 2 generation, or use ChatGPT Pro manually';
+  }
+  if (providerId === 'heygen-cloud' && heygenCliStatus() !== 'cli-ready') {
+    return 'Authenticated HeyGen CLI session or HEYGEN_API_KEY-backed CLI auth';
+  }
+  if (providerId === 'replicate-cloud') return 'REPLICATE_API_TOKEN in a secure backend/host environment';
+  return '';
 }
 
 function resolveRuntimeDir(options = {}) {
@@ -245,6 +323,20 @@ function getEngineCapabilities(appRoot) {
     whisperModel: whisperModel ? path.basename(whisperModel) : '',
     providers: [
       {
+        id: 'direct-seedance-2',
+        label: 'Direct Seedance 2.0',
+        status: directSeedanceStatus(),
+        secretEnv: 'SEEDANCE_API_KEY / BYTEPLUS_API_KEY',
+        role: 'Cost-first direct BytePlus ModelArk Seedance route for multimodal video generation.',
+      },
+      {
+        id: 'direct-kling-3',
+        label: 'Direct Kling 3.0',
+        status: directKlingStatus(),
+        secretEnv: 'KLING_API_KEY',
+        role: 'Cost-first direct Kling route for image-to-video jobs using first-frame avatar stills.',
+      },
+      {
         id: 'fal-seedance-reference',
         label: FAL_PROVIDERS['fal-seedance-reference'].label,
         status: falSecretStatus(),
@@ -257,6 +349,20 @@ function getEngineCapabilities(appRoot) {
         status: falSecretStatus(),
         secretEnv: 'FAL_KEY',
         role: FAL_PROVIDERS['fal-pixverse-swap'].role,
+      },
+      {
+        id: 'heygen-cloud',
+        label: 'HeyGen Video Agent',
+        status: heygenCliStatus(),
+        secretEnv: 'heygen CLI auth',
+        role: 'Talking-head, presenter, and avatar-led UGC through the authenticated HeyGen CLI.',
+      },
+      {
+        id: 'openai-image-2',
+        label: 'OpenAI GPT Image 2',
+        status: openAiImageStatus(),
+        secretEnv: 'OPENAI_API_KEY',
+        role: 'High-quality first-frame stills, ad images, keyframes, and carousel source images.',
       },
       {
         id: 'pixverse-direct-swap',
@@ -1154,7 +1260,7 @@ async function prepareSourceUrl(rawUrl, options = {}) {
     media: normalizedProbe,
     analysis,
     transcript,
-    nextAdapters: ['fal-seedance-reference', 'fal-pixverse-swap', 'pixverse-direct-swap', 'local-faceswap-lab'],
+    nextAdapters: ['direct-seedance-2', 'direct-kling-3', 'fal-pixverse-swap', 'heygen-cloud', 'openai-image-2'],
     notes: [
       `Source clipped to the first ${MAX_SOURCE_SECONDS} seconds for predictable cost and provider limits.`,
       'Normalized MP4 is ready for upload to provider storage.',
@@ -1240,10 +1346,10 @@ async function prepareSourceFile(filePath, options = {}) {
     media: normalizedProbe,
     analysis: null,
     transcript,
-    nextAdapters: ['fal-seedance-reference', 'fal-pixverse-swap'],
+    nextAdapters: ['direct-seedance-2', 'direct-kling-3', 'fal-pixverse-swap', 'heygen-cloud', 'openai-image-2'],
     notes: [
       `Local source clipped to the first ${MAX_SOURCE_SECONDS} seconds for predictable cost and provider limits.`,
-      'Normalized MP4 is ready for upload to fal storage.',
+      'Normalized MP4 is ready for direct provider, fal fallback, or local finishing handoff.',
       transcript.status === 'ready'
         ? `Transcript ready via ${transcript.source}.`
         : 'Transcript unavailable; provider can still render motion/reference video.',
@@ -1254,11 +1360,283 @@ async function prepareSourceFile(filePath, options = {}) {
   return prepared;
 }
 
-function buildProviderPackets(input) {
+function safeSlug(value, fallback = 'copytok') {
+  const slug = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return slug || fallback;
+}
+
+function resolveMarketingRoot(input) {
+  const root = input.campaign?.marketingRoot;
+  if (typeof root === 'string' && root.startsWith(MARKETING_OUTPUT_ROOT)) return root;
+  const appName = input.campaign?.name === 'Tone Clone' ? 'ToneClone' : input.campaign?.name || 'Unassigned';
+  return path.join(MARKETING_OUTPUT_ROOT, safeSlug(appName, 'unassigned'));
+}
+
+function buildGenerationVariants(input) {
+  const requested = Math.max(1, Math.min(Number(input.preset?.generationCount) || 1, 3));
+  const slots = Array.isArray(input.avatarSlots) ? input.avatarSlots : [];
+  const fallback = {
+    slot: 1,
+    avatarId: 'uploaded-first-frame',
+    avatarName: 'Uploaded first-frame image',
+    avatarStyle: 'User-supplied',
+    avatarPrompt: 'Use the uploaded avatar image as the first frame and identity anchor.',
+    localImageName: input.referenceFace || '',
+    localImagePath: input.referenceFacePath || '',
+  };
+  return Array.from({ length: requested }, (_unused, index) => {
+    const slot = slots[index] || (index === 0 ? fallback : {});
+    return {
+      slot: index + 1,
+      avatarId: slot.avatarId || (index === 0 ? fallback.avatarId : `avatar-${index + 1}`),
+      avatarName: slot.avatarName || (index === 0 ? fallback.avatarName : `Avatar ${index + 1}`),
+      avatarStyle: slot.avatarStyle || '',
+      avatarPrompt: slot.avatarPrompt || '',
+      usageNote: slot.usageNote || '',
+      localImageName: slot.localImageName || (index === 0 ? fallback.localImageName : ''),
+      localImagePath: slot.localImagePath || (index === 0 ? fallback.localImagePath : ''),
+      renderable: Boolean(slot.localImagePath || (index === 0 && fallback.localImagePath)),
+    };
+  });
+}
+
+function campaignContext(input) {
+  const campaign = input.campaign || {};
+  const formatCategory = input.formatCategory || {};
+  const trendPreset = input.trendPreset || {};
+  return {
+    appName: campaign.name || 'CopyTok campaign',
+    appShortName: campaign.shortName || '',
+    oneLineTruth: campaign.oneLineTruth || '',
+    audience: campaign.audience || [],
+    tone: campaign.tone || [],
+    approvedCtas: campaign.approvedCtas || [],
+    productTruths: campaign.productTruths || [],
+    claimBoundaries: campaign.claimBoundaries || [],
+    bannedAngles: campaign.bannedAngles || [],
+    format: {
+      id: formatCategory.id || '',
+      name: formatCategory.name || '',
+      summary: formatCategory.summary || '',
+      bestFor: formatCategory.bestFor || '',
+    },
+    trend: {
+      id: trendPreset.id || '',
+      name: trendPreset.name || '',
+      hookPattern: trendPreset.hookPattern || '',
+      firstThreeSeconds: trendPreset.firstThreeSeconds || '',
+      visualBehavior: trendPreset.visualBehavior || '',
+      promptTemplate: trendPreset.promptTemplate || '',
+    },
+  };
+}
+
+function providerPrompt(input, variant) {
+  const context = campaignContext(input);
+  const transcript = input.preparedSource?.transcript?.text
+    ? `Reference transcript or caption structure: ${truncate(input.preparedSource.transcript.text, 1100)}`
+    : 'No source transcript is available; infer timing from the normalized video only.';
+  return [
+    `Campaign app: ${context.appName}.`,
+    `Product truth: ${context.oneLineTruth}`,
+    `Format: ${context.format.name}. ${context.format.summary}`,
+    `Saved trend hook: ${context.trend.firstThreeSeconds}`,
+    `Visual behavior to mimic: ${context.trend.visualBehavior}`,
+    `Avatar: ${variant.avatarName}. ${variant.avatarPrompt}`,
+    'Use the avatar image as the first frame and identity anchor. Use the source video as the action, gesture, timing, framing, pacing, and edit reference.',
+    'Keep the result realistic, phone-native, and suitable for internal marketing review.',
+    'Preserve provider settings such as resolution, duration, aspect ratio, and model outside the prompt.',
+    transcript,
+    `Avoid: ${(context.bannedAngles || []).join('; ')}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function negativeVideoPrompt(input) {
+  const boundaries = input.campaign?.claimBoundaries || [];
+  return [
+    'No fake celebrity, no protected likeness, no medical claim, no guaranteed result, no brand logo hallucination.',
+    ...boundaries,
+  ]
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function openAiImageSize(aspectRatio, resolution) {
+  if (aspectRatio === '1:1') return resolution === '1080p' ? '1536x1536' : '1024x1024';
+  if (aspectRatio === '16:9') return resolution === '1080p' ? '1536x864' : '1280x720';
+  return resolution === '1080p' ? '1024x1792' : '1024x1536';
+}
+
+function buildHeygenPrompt(input, variant) {
+  const context = campaignContext(input);
+  const transcript = input.preparedSource?.transcript?.text
+    ? `Use this source caption/transcript structure as inspiration, while rewriting for ${context.appName}: ${truncate(input.preparedSource.transcript.text, 900)}`
+    : '';
+  return [
+    `Create a short vertical UGC-style presenter video for ${context.appName}.`,
+    `Audience: ${(context.audience || []).join('; ')}`,
+    `Tone: ${(context.tone || []).join(', ')}`,
+    `Opening hook: ${context.trend.firstThreeSeconds}`,
+    `Format: ${context.format.name}. ${context.trend.promptTemplate || context.format.summary}`,
+    `Avatar direction: ${variant.avatarPrompt || variant.avatarName}`,
+    `Product truth: ${context.oneLineTruth}`,
+    `Allowed CTA: ${(context.approvedCtas || [])[0] || 'Try it today.'}`,
+    `Avoid these claims: ${(context.bannedAngles || []).join('; ')}`,
+    transcript,
+    'Keep it phone-native, natural, direct, and under 20 seconds unless the script demands less.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildFinishPlan(input, packetId, variants) {
+  const captionStyle = input.preset?.captionStyle ?? 'tiktok-bold';
+  const dateSlug = new Date().toISOString().slice(0, 10);
+  const campaignRoot = resolveMarketingRoot(input);
+  const formatSlug = safeSlug(input.formatCategory?.name || input.formatCategory?.id || 'format');
+  const outputDir = path.join(campaignRoot, 'Generated Outputs', dateSlug, `${formatSlug}-${packetId}`);
+  return {
+    engine: 'ffmpeg',
+    execution: 'automatic-local-backend',
+    outputDir,
+    rules: [
+      'Use hard visual cuts only.',
+      'Align hard audio cuts to visual cuts.',
+      'Preserve native source cadence when possible; do not fake frame interpolation.',
+      'Final export: MP4, H.264 High Profile, progressive, square pixel, SDR Rec.709, yuv420p, AAC-LC stereo 48 kHz, +faststart.',
+      'Default CRF 16-18 with slow preset when time allows.',
+    ],
+    captions: {
+      style: captionStyle,
+      burnIn: captionStyle !== 'none',
+      source: input.preparedSource?.transcript?.path || 'provider transcript/source captions when available',
+    },
+    commands: {
+      inspect:
+        'ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate,avg_frame_rate,pix_fmt,color_space,color_transfer,color_primaries -show_entries format=duration -of json input.mp4',
+      finalExport:
+        'ffmpeg -f concat -safe 0 -i clips.txt -c:v libx264 -preset slow -crf 16 -pix_fmt yuv420p -colorspace bt709 -color_primaries bt709 -color_trc bt709 -c:a aac -b:a 320k -ar 48000 -movflags +faststart output.mp4',
+    },
+    variants: variants.map((variant) => ({
+      slot: variant.slot,
+      avatarName: variant.avatarName,
+      outputFile: path.join(outputDir, `variant-${variant.slot}-${safeSlug(variant.avatarName)}.mp4`),
+    })),
+    agentRecommendation:
+      'Marketing/Codex agents should create the script, hook, and shot brief; CopyTok should run the deterministic FFmpeg finish automatically from this plan.',
+  };
+}
+
+function buildProviderPackets(input, packetId = 'packet') {
   const resolution = input.preset?.resolution ?? '720p';
   const aspectRatio = input.preset?.aspectRatio ?? '9:16';
+  const variants = buildGenerationVariants(input);
   const pixverseResolution = falResolution('fal-pixverse-swap', resolution);
+  const context = campaignContext(input);
+  const finishPlan = buildFinishPlan(input, packetId, variants);
   return {
+    campaignContext: context,
+    variants,
+    finishingPlan: finishPlan,
+    directSeedance2: {
+      provider: 'byteplus-modelark',
+      model: 'seedance-2.0',
+      secretEnv: 'SEEDANCE_API_KEY or BYTEPLUS_API_KEY',
+      requiredConfig: ['SEEDANCE_CREATE_URL or SEEDANCE_API_BASE_URL', 'SEEDANCE_STATUS_URL_TEMPLATE for polling'],
+      mode: 'async-video-generation',
+      requestTemplate: {
+        model: 'seedance-2.0',
+        prompt: '<variant-specific prompt>',
+        negative_prompt: negativeVideoPrompt(input),
+        inputs: {
+          first_frame_image: '<upload-or-provider-file-id-for-avatar-image>',
+          reference_video: '<upload-or-provider-file-id-for-normalized-source-video>',
+          optional_audio_reference: '<upload-or-provider-file-id-for-source-audio>',
+        },
+        resolution,
+        aspect_ratio: aspectRatio,
+        duration_seconds: 'auto_or_4_to_15',
+        quality: 'high',
+        audio: Boolean(input.preparedSource?.files?.audio),
+      },
+      variants: variants.map((variant) => ({
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        localImagePath: variant.localImagePath,
+        prompt: providerPrompt(input, variant),
+      })),
+    },
+    directKling3: {
+      provider: 'kling-open-platform',
+      model: 'kling-3.0',
+      secretEnv: 'KLING_API_KEY',
+      requiredConfig: ['KLING_CREATE_URL', 'KLING_STATUS_URL_TEMPLATE for polling'],
+      mode: 'image_to_video',
+      requestTemplate: {
+        mode: 'image_to_video',
+        model: 'kling-3.0',
+        reference_image: '<upload-or-provider-file-id-for-avatar-image>',
+        reference_video: '<optional-normalized-source-video-if-enabled-by-account-schema>',
+        prompt: '<variant-specific prompt>',
+        negative_prompt: negativeVideoPrompt(input),
+        duration_seconds: 7,
+        resolution,
+        aspect_ratio: aspectRatio,
+        fps_preference: 'highest_native',
+        audio: false,
+      },
+      variants: variants.map((variant) => ({
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        localImagePath: variant.localImagePath,
+        prompt: providerPrompt(input, variant),
+      })),
+    },
+    openAiImage2: {
+      provider: 'openai',
+      model: 'gpt-image-2',
+      secretEnv: 'OPENAI_API_KEY',
+      mode: 'high-quality-still-generation',
+      requestTemplate: {
+        model: 'gpt-image-2',
+        quality: 'high',
+        size: openAiImageSize(aspectRatio, resolution),
+        output_format: 'png',
+      },
+      variants: variants.map((variant) => ({
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        prompt:
+          variant.avatarPrompt ||
+          `${context.appName} UGC creator first-frame portrait, photorealistic vertical phone image, premium social ad lighting.`,
+      })),
+    },
+    heygenVideoAgent: {
+      provider: 'heygen-cli',
+      model: 'video-agent-v3',
+      secretEnv: 'heygen CLI auth',
+      mode: 'talking-head-or-presenter',
+      requestTemplate: {
+        orientation: aspectRatio === '16:9' ? 'landscape' : 'portrait',
+        prompt: '<campaign-aware video-agent prompt>',
+      },
+      variants: variants.map((variant) => ({
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        prompt: buildHeygenPrompt(input, variant),
+      })),
+    },
     falSeedanceReference: {
       provider: 'fal',
       model: FAL_PROVIDERS['fal-seedance-reference'].model,
@@ -1320,6 +1698,8 @@ function buildProviderPackets(input) {
 }
 
 function seedancePrompt(input) {
+  const variant = input.activeVariant || buildGenerationVariants(input)[0] || {};
+  const context = campaignContext(input);
   const transcript = input.preparedSource?.transcript?.text
     ? ` Reference transcript: ${truncate(input.preparedSource.transcript.text, 1600)}`
     : '';
@@ -1327,9 +1707,13 @@ function seedancePrompt(input) {
     ? ' Use @Audio1 as the audio, voice, cadence, and timing reference when possible.'
     : '';
   return [
+    `Campaign app: ${context.appName}. Product truth: ${context.oneLineTruth}`,
+    `Trend hook to preserve: ${context.trend.firstThreeSeconds}`,
+    `Avatar direction: ${variant.avatarName || 'uploaded avatar'} ${variant.avatarPrompt || ''}`,
     'Create a vertical social UGC clip using @Image1 as the avatar identity and @Video1 as the action, camera, gesture, timing, framing, and edit reference.',
     'Keep the output realistic, clean, brand-safe, and suitable for internal marketing review.',
     'Preserve the source clip pacing and body performance as closely as the model allows.',
+    `Avoid: ${(context.bannedAngles || []).join('; ')}`,
     audioInstruction,
     transcript,
   ]
@@ -1424,19 +1808,93 @@ async function downloadProviderOutput(url, outputDir, providerId, requestId) {
   return outputPath;
 }
 
-async function renderWithProvider(input, options = {}) {
+async function writeProviderPayload(userDataPath, providerId, requestId, payload) {
+  const payloadDir = path.join(userDataPath, 'provider-payloads');
+  await fsPromises.mkdir(payloadDir, { recursive: true });
+  const providerPayloadPath = path.join(payloadDir, `${providerId}-${requestId || Date.now().toString(36)}.json`);
+  await fsPromises.writeFile(providerPayloadPath, JSON.stringify(payload, null, 2));
+  return providerPayloadPath;
+}
+
+function providerOutputDir(input, userDataPath, providerId, requestId) {
+  const campaignRoot = resolveMarketingRoot(input);
+  const dateSlug = new Date().toISOString().slice(0, 10);
+  if (campaignRoot.startsWith(MARKETING_OUTPUT_ROOT)) {
+    return path.join(campaignRoot, 'Generated Outputs', dateSlug, `${providerId}-${requestId}`);
+  }
+  return path.join(userDataPath, 'provider-outputs', `${providerId}-${requestId}`);
+}
+
+function providerLabel(providerId) {
+  if (FAL_PROVIDERS[providerId]) return FAL_PROVIDERS[providerId].label;
+  if (providerId === 'direct-seedance-2') return 'Direct Seedance 2.0';
+  if (providerId === 'direct-kling-3') return 'Direct Kling 3.0';
+  if (providerId === 'openai-image-2') return 'OpenAI GPT Image 2';
+  if (providerId === 'heygen-cloud') return 'HeyGen Video Agent';
+  return 'CopyTok Provider';
+}
+
+function modelForProvider(providerId) {
+  if (FAL_PROVIDERS[providerId]) return FAL_PROVIDERS[providerId].model;
+  if (providerId === 'direct-seedance-2') return 'seedance-2.0';
+  if (providerId === 'direct-kling-3') return 'kling-3.0';
+  if (providerId === 'openai-image-2') return 'gpt-image-2';
+  if (providerId === 'heygen-cloud') return 'video-agent-v3';
+  return '';
+}
+
+async function blockedProviderResult(input, options, error, extra = {}) {
+  const createdAt = new Date().toISOString();
+  const userDataPath = resolveRuntimeDir(options);
+  const requestId = `blocked-${Date.now().toString(36)}`;
+  const providerPayloadPath = await writeProviderPayload(userDataPath, input.providerId, requestId, {
+    createdAt,
+    providerId: input.providerId,
+    providerName: providerLabel(input.providerId),
+    model: modelForProvider(input.providerId),
+    status: 'blocked',
+    error,
+    ...extra,
+    packet: buildProviderPackets(input, requestId),
+  });
+  return {
+    ok: false,
+    providerId: input.providerId,
+    providerName: providerLabel(input.providerId),
+    model: modelForProvider(input.providerId),
+    status: 'blocked',
+    requestId,
+    providerPayloadPath,
+    error,
+    createdAt,
+  };
+}
+
+function requireRenderableVariants(input, referencePath) {
+  const variants = buildGenerationVariants(input);
+  const missing = variants.filter((variant) => !variant.localImagePath && !(variant.slot === 1 && referencePath));
+  if (missing.length) {
+    throw new Error(
+      `Attach a first-frame image for ${missing.map((variant) => `Video ${variant.slot}`).join(', ')} before rendering multiple variants.`,
+    );
+  }
+  return variants.map((variant) => ({
+    ...variant,
+    localImagePath: variant.localImagePath || (variant.slot === 1 ? referencePath : ''),
+  }));
+}
+
+async function renderWithFalProvider(input, options = {}) {
   const provider = FAL_PROVIDERS[input.providerId];
   const createdAt = new Date().toISOString();
   if (!provider) {
-    throw new Error('Select Seedance or PixVerse before rendering.');
-  }
-  if (!input.compliance?.faceConsent || !input.compliance?.sourceRights || !input.compliance?.aiDisclosure) {
-    throw new Error('Complete the rights and AI disclosure checks before rendering.');
+    throw new Error('Select a fal-backed provider before using the fal render adapter.');
   }
 
   const userDataPath = resolveRuntimeDir(options);
   const appRoot = options.appRoot || '';
   const referencePath = assertExistingFile(input.referenceFacePath, 'Avatar image');
+  const variants = requireRenderableVariants(input, referencePath);
   const preparedSource =
     input.preparedSource?.ok
       ? input.preparedSource
@@ -1448,46 +1906,60 @@ async function renderWithProvider(input, options = {}) {
     : assertExistingFile(input.sourceVideoPath, 'Source video');
   const fal = await loadFalClient();
   const logs = [];
-  const imageUrl = await uploadFileToFal(fal, referencePath);
   const videoUrl = await uploadFileToFal(fal, sourceVideoPath);
   const audioUrl =
     input.providerId === 'fal-seedance-reference' && preparedSource?.files?.audio && fs.existsSync(preparedSource.files.audio)
       ? await uploadFileToFal(fal, preparedSource.files.audio)
       : '';
-  const request = buildFalRequest(input.providerId, { ...input, preparedSource }, { imageUrl, videoUrl, audioUrl });
-  const result = await fal.subscribe(provider.model, {
-    input: request,
-    logs: true,
-    onQueueUpdate: (update) => {
-      if (Array.isArray(update.logs)) {
-        logs.push(...update.logs.map((log) => truncate(log.message ?? String(log), 240)));
-      }
-    },
-  });
-  const outputUrl = extractFalVideoUrl(result.data);
-  const outputDir = path.join(userDataPath, 'provider-outputs');
-  const outputPath = await downloadProviderOutput(outputUrl, outputDir, input.providerId, result.requestId);
-  const payloadDir = path.join(userDataPath, 'provider-payloads');
-  await fsPromises.mkdir(payloadDir, { recursive: true });
-  const providerPayloadPath = path.join(payloadDir, `${input.providerId}-${result.requestId || Date.now().toString(36)}.json`);
-  await fsPromises.writeFile(
-    providerPayloadPath,
-    JSON.stringify(
-      {
-        createdAt,
-        providerId: input.providerId,
-        providerName: provider.label,
-        model: provider.model,
-        requestId: result.requestId,
-        request,
-        outputUrl,
-        outputPath,
-        preparedSourceRunId: preparedSource?.runId,
+  const batchRequestId = `fal-${Date.now().toString(36)}`;
+  const outputDir = providerOutputDir(input, userDataPath, input.providerId, batchRequestId);
+  const variantResults = [];
+  const requests = [];
+
+  for (const variant of variants) {
+    const imageUrl = await uploadFileToFal(fal, assertExistingFile(variant.localImagePath, `Video ${variant.slot} avatar image`));
+    const request = buildFalRequest(input.providerId, { ...input, preparedSource, activeVariant: variant }, { imageUrl, videoUrl, audioUrl });
+    requests.push({ slot: variant.slot, avatarName: variant.avatarName, request });
+    const result = await fal.subscribe(provider.model, {
+      input: request,
+      logs: true,
+      onQueueUpdate: (update) => {
+        if (Array.isArray(update.logs)) {
+          logs.push(...update.logs.map((log) => truncate(log.message ?? String(log), 240)));
+        }
       },
-      null,
-      2,
-    ),
-  );
+    });
+    const outputUrl = extractFalVideoUrl(result.data);
+    const outputPath = await downloadProviderOutput(
+      outputUrl,
+      outputDir,
+      `variant-${variant.slot}-${safeSlug(variant.avatarName)}`,
+      result.requestId,
+    );
+    variantResults.push({
+      slot: variant.slot,
+      avatarName: variant.avatarName,
+      requestId: result.requestId,
+      outputUrl,
+      outputPath,
+      status: 'complete',
+    });
+  }
+
+  const providerPayloadPath = await writeProviderPayload(userDataPath, input.providerId, batchRequestId, {
+    createdAt,
+    providerId: input.providerId,
+    providerName: provider.label,
+    model: provider.model,
+    requestId: batchRequestId,
+    requests,
+    variants: variantResults,
+    outputDir,
+    preparedSourceRunId: preparedSource?.runId,
+    campaign: campaignContext(input),
+    finishingPlan: buildFinishPlan(input, batchRequestId, variants),
+  });
+  const firstVariant = variantResults[0];
 
   return {
     ok: true,
@@ -1495,13 +1967,207 @@ async function renderWithProvider(input, options = {}) {
     providerName: provider.label,
     model: provider.model,
     status: 'complete',
-    requestId: result.requestId,
-    outputUrl,
-    outputPath,
+    requestId: batchRequestId,
+    outputUrl: firstVariant?.outputUrl,
+    outputPath: firstVariant?.outputPath,
     providerPayloadPath,
+    variants: variantResults,
     logs: logs.slice(-20),
     createdAt,
   };
+}
+
+async function renderWithHeygenCli(input, options = {}) {
+  const createdAt = new Date().toISOString();
+  const userDataPath = resolveRuntimeDir(options);
+  const cliPath = resolveHeygenCli();
+  if (!cliPath || heygenCliStatus() !== 'cli-ready') {
+    return blockedProviderResult(input, options, 'HeyGen CLI is not installed or authenticated. Open HeyGen or run heygen auth login first.');
+  }
+  const requestId = `heygen-${Date.now().toString(36)}`;
+  const variants = buildGenerationVariants(input);
+  const prompt = buildHeygenPrompt(input, variants[0]);
+  const orientation = input.preset?.aspectRatio === '16:9' ? 'landscape' : 'portrait';
+  const result = spawnSync(
+    cliPath,
+    ['video-agent', 'create', '--mode', 'generate', '--orientation', orientation, '--prompt', prompt, '--wait'],
+    { encoding: 'utf8', timeout: 1000 * 60 * 22, maxBuffer: MAX_BUFFER },
+  );
+  const stdout = result.stdout?.trim() || '';
+  const stderr = result.stderr?.trim() || '';
+  if (result.status !== 0) {
+    const error = truncate(stderr || stdout || 'HeyGen video creation failed.', 900);
+    return blockedProviderResult(input, options, error, { stdout: truncate(stdout, 1200), stderr: truncate(stderr, 1200) });
+  }
+  let parsed = null;
+  try {
+    parsed = stdout ? JSON.parse(stdout) : null;
+  } catch {
+    parsed = null;
+  }
+  const videoUrl =
+    parsed?.data?.video_url ||
+    parsed?.data?.video?.video_url ||
+    parsed?.video_url ||
+    parsed?.data?.url ||
+    '';
+  const sessionId = parsed?.data?.session_id || parsed?.session_id || requestId;
+  const providerPayloadPath = await writeProviderPayload(userDataPath, input.providerId, sessionId, {
+    createdAt,
+    providerId: input.providerId,
+    providerName: 'HeyGen Video Agent',
+    model: 'video-agent-v3',
+    requestId: sessionId,
+    prompt,
+    orientation,
+    result: parsed || stdout,
+    finishingPlan: buildFinishPlan(input, sessionId, variants),
+  });
+  return {
+    ok: true,
+    providerId: input.providerId,
+    providerName: 'HeyGen Video Agent',
+    model: 'video-agent-v3',
+    status: 'complete',
+    requestId: sessionId,
+    outputUrl: videoUrl,
+    providerPayloadPath,
+    logs: ['HeyGen CLI completed the video-agent request.'],
+    createdAt,
+  };
+}
+
+async function renderWithOpenAiImage(input, options = {}) {
+  const apiKey = resolveSecret(PROVIDER_SECRETS.openAiApiKey);
+  if (!apiKey) {
+    return blockedProviderResult(input, options, 'OPENAI_API_KEY is missing. Use ChatGPT Pro manually or store an API key in the CopyTok Keychain for in-app image generation.');
+  }
+  const createdAt = new Date().toISOString();
+  const userDataPath = resolveRuntimeDir(options);
+  const requestId = `openai-image-${Date.now().toString(36)}`;
+  const variants = buildGenerationVariants(input);
+  const outputDir = providerOutputDir(input, userDataPath, input.providerId, requestId);
+  await fsPromises.mkdir(outputDir, { recursive: true });
+  const imageResults = [];
+  const requests = [];
+  for (const variant of variants) {
+    const prompt =
+      variant.avatarPrompt ||
+      `${input.campaign?.name || 'CopyTok'} UGC first-frame creator portrait, photorealistic, vertical phone-native, premium lighting.`;
+    const request = {
+      model: 'gpt-image-2',
+      prompt,
+      size: openAiImageSize(input.preset?.aspectRatio ?? '9:16', input.preset?.resolution ?? '720p'),
+      quality: 'high',
+      output_format: 'png',
+      n: 1,
+    };
+    requests.push({ slot: variant.slot, avatarName: variant.avatarName, request });
+    const response = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      const detail = truncate(await response.text().catch(() => ''), 900);
+      return blockedProviderResult(input, options, `OpenAI image generation failed with HTTP ${response.status}. ${detail}`.trim(), {
+        request,
+      });
+    }
+    const payload = await response.json();
+    const image = payload?.data?.[0];
+    const outputPath = path.join(outputDir, `variant-${variant.slot}-${safeSlug(variant.avatarName)}.png`);
+    if (image?.b64_json) {
+      await fsPromises.writeFile(outputPath, Buffer.from(image.b64_json, 'base64'));
+    } else if (image?.url) {
+      const downloaded = await fetch(image.url);
+      if (!downloaded.ok) throw new Error(`OpenAI image download failed with ${downloaded.status}.`);
+      await fsPromises.writeFile(outputPath, Buffer.from(await downloaded.arrayBuffer()));
+    } else {
+      throw new Error('OpenAI image generation returned no image data.');
+    }
+    imageResults.push({
+      slot: variant.slot,
+      avatarName: variant.avatarName,
+      requestId: payload.id || `${requestId}-${variant.slot}`,
+      outputPath,
+      status: 'complete',
+    });
+  }
+  const providerPayloadPath = await writeProviderPayload(userDataPath, input.providerId, requestId, {
+    createdAt,
+    providerId: input.providerId,
+    providerName: 'OpenAI GPT Image 2',
+    model: 'gpt-image-2',
+    requestId,
+    requests,
+    variants: imageResults,
+    outputDir,
+  });
+  const first = imageResults[0];
+  return {
+    ok: true,
+    providerId: input.providerId,
+    providerName: 'OpenAI GPT Image 2',
+    model: 'gpt-image-2',
+    status: 'complete',
+    requestId,
+    outputPath: first?.outputPath,
+    providerPayloadPath,
+    variants: imageResults,
+    logs: ['Generated high-quality GPT Image 2 stills for avatar/keyframe use.'],
+    createdAt,
+  };
+}
+
+async function renderWithDirectPacketOnly(input, options = {}) {
+  if (input.providerId === 'direct-kling-3') {
+    if (!hasSecret(PROVIDER_SECRETS.klingApiKey)) {
+      return blockedProviderResult(input, options, 'KLING_API_KEY is missing. Create a direct Kling API key, then store it in the CopyTok Keychain.');
+    }
+    if (!hasSecret(PROVIDER_SECRETS.klingCreateUrl)) {
+      return blockedProviderResult(
+        input,
+        options,
+        'Direct Kling credentials exist, but KLING_CREATE_URL is not configured. Add the exact account-console image-to-video task endpoint before live submission.',
+      );
+    }
+  }
+  if (input.providerId === 'direct-seedance-2') {
+    if (!hasSecret(PROVIDER_SECRETS.seedanceApiKey) && !hasSecret(PROVIDER_SECRETS.byteplusApiKey)) {
+      return blockedProviderResult(input, options, 'SEEDANCE_API_KEY or BYTEPLUS_API_KEY is missing. Create a BytePlus ModelArk Seedance API key, then store it in the CopyTok Keychain.');
+    }
+    if (!hasSecret(PROVIDER_SECRETS.seedanceCreateUrl) && !hasSecret(PROVIDER_SECRETS.seedanceBaseUrl)) {
+      return blockedProviderResult(
+        input,
+        options,
+        'Direct Seedance credentials exist, but SEEDANCE_CREATE_URL or SEEDANCE_API_BASE_URL is not configured. Add the exact ModelArk video-generation endpoint before live submission.',
+      );
+    }
+  }
+  return blockedProviderResult(
+    input,
+    options,
+    'Direct provider packet is ready, but the provider upload/task client still needs the vendor-specific file upload and polling schema from the account console.',
+  );
+}
+
+async function renderWithProvider(input, options = {}) {
+  if (!input.compliance?.faceConsent || !input.compliance?.sourceRights || !input.compliance?.aiDisclosure) {
+    throw new Error('Complete the rights and AI disclosure checks before rendering.');
+  }
+
+  if (FAL_PROVIDERS[input.providerId]) return renderWithFalProvider(input, options);
+  if (input.providerId === 'heygen-cloud') return renderWithHeygenCli(input, options);
+  if (input.providerId === 'openai-image-2') return renderWithOpenAiImage(input, options);
+  if (['direct-kling-3', 'direct-seedance-2'].includes(input.providerId)) return renderWithDirectPacketOnly(input, options);
+  if (input.providerId === 'mock-local') {
+    return blockedProviderResult(input, options, 'Mock local provider writes packets only and does not call a video model.');
+  }
+  return blockedProviderResult(input, options, 'Selected provider does not have a live CopyTok adapter yet.');
 }
 
 async function createRenderPacket(input, options = {}) {
@@ -1509,6 +2175,11 @@ async function createRenderPacket(input, options = {}) {
   const packetId = `packet-${Date.now().toString(36)}`;
   const packetDir = path.join(userDataPath, 'render-packets');
   await fsPromises.mkdir(packetDir, { recursive: true });
+  const providerPackets = buildProviderPackets(input, packetId);
+  const finishDir = providerPackets.finishingPlan?.outputDir;
+  if (finishDir) {
+    await fsPromises.mkdir(finishDir, { recursive: true });
+  }
   const packet = {
     id: packetId,
     createdAt: new Date().toISOString(),
@@ -1527,15 +2198,8 @@ async function createRenderPacket(input, options = {}) {
       realEsrgan: 'optional post-render upscale hook',
       rembg: 'optional avatar cleanup hook',
     },
-    providerPackets: buildProviderPackets(input),
-    nextRequiredSecret:
-      ['fal-seedance-reference', 'fal-pixverse-swap'].includes(input.providerId) && !resolveFalKey()
-        ? 'FAL_KEY in the CopyTok macOS Keychain entry or secure environment'
-        : input.providerId === 'replicate-cloud'
-          ? 'REPLICATE_API_TOKEN in a secure backend/host environment'
-          : input.providerId === 'heygen-cloud'
-            ? 'HEYGEN_API_KEY in a secure backend/host environment'
-            : '',
+    providerPackets,
+    nextRequiredSecret: nextRequiredSecretForProvider(input.providerId),
   };
   const packetPath = path.join(packetDir, `${packetId}.json`);
   await fsPromises.writeFile(packetPath, JSON.stringify(packet, null, 2));
