@@ -130,6 +130,50 @@ interface RenderPacket {
   providerPackets: Record<string, unknown>;
 }
 
+interface TrendScoutStatus {
+  checkedAt: string;
+  runtimeDir: string;
+  databasePath: string;
+  providers: Array<{
+    id: 'local-demo' | 'apify-tiktok';
+    label: string;
+    status: 'ready' | 'missing-secret' | 'offline';
+    role: string;
+    secretName?: string;
+  }>;
+  cache: {
+    runCount: number;
+    postCount: number;
+    briefCount: number;
+  };
+}
+
+interface TrendScoutRunResult {
+  ok: boolean;
+  runId: string;
+  providerId: 'local-demo' | 'apify-tiktok';
+  appProfileId: 'snapglp' | 'toneclone';
+  query: string;
+  fetchedAt: string;
+  posts: unknown[];
+  warnings: string[];
+  message: string;
+  databasePath?: string;
+}
+
+interface TrendAdaptationHostResult {
+  id: string;
+  createdAt: string;
+  appProfileId: 'snapglp' | 'toneclone';
+  appName: string;
+  postId: string;
+  sourceUrl: string;
+  sourceLabel: string;
+  title: string;
+  savedPath?: string;
+  mimicPlan: Record<string, unknown>;
+}
+
 interface Window {
   studioHost?: {
     getHostInfo: () => Promise<StudioHostInfo>;
@@ -137,6 +181,9 @@ interface Window {
     getFilePath: (file: File) => string;
     openExternal: (url: string) => Promise<boolean>;
     openChatGPTPro: () => Promise<boolean>;
+    getTrendScoutStatus: () => Promise<TrendScoutStatus>;
+    runTrendScout: (input: unknown) => Promise<TrendScoutRunResult>;
+    createTrendAdaptation: (input: unknown) => Promise<TrendAdaptationHostResult>;
     analyzeSourceUrl: (url: string) => Promise<SourceLinkAnalysis>;
     prepareSourceUrl: (url: string) => Promise<PreparedSource>;
     prepareSourceFile: (filePath: string) => Promise<PreparedSource>;

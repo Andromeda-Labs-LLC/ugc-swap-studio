@@ -1,22 +1,35 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  Activity,
   ArrowDownToLine,
+  AudioWaveform,
+  BarChart3,
   CheckCircle2,
   CircleAlert,
   Clock3,
+  CopyCheck,
+  Database,
   ExternalLink,
   FileText,
   FolderKanban,
+  Gauge,
   HelpCircle,
+  HeartPulse,
   Image,
   Link,
   List,
   Mic2,
+  MousePointerClick,
   Play,
   RefreshCw,
+  Search,
   Settings,
+  Share2,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Target,
+  TrendingUp,
   UploadCloud,
   User,
   WandSparkles,
@@ -37,6 +50,23 @@ import {
   type RenderPreset,
   type SourceReferenceSummary,
 } from './domain'
+import {
+  engagementPercent,
+  formatMetric,
+  getTrendAppProfile,
+  profileQueryValue,
+  sortTrendPosts,
+  trendAppProfiles,
+  trendScoutProviderOptions,
+  trendSortOptions,
+  type TrendAdaptationBrief,
+  type TrendAppProfileId,
+  type TrendPost,
+  type TrendScoutProviderId,
+  type TrendScoutResult,
+  type TrendScoutSort,
+  type TrendScoutStatus,
+} from './trendScout'
 
 const defaultPreset: RenderPreset = {
   resolution: '720p',
@@ -55,6 +85,7 @@ const defaultCompliance: ComplianceState = {
 
 const navItems = [
   { label: 'Projects', icon: FolderKanban },
+  { label: 'Trend Scout', icon: Search },
   { label: 'Queue', icon: List },
   { label: 'Settings', icon: Settings },
 ]
@@ -83,10 +114,23 @@ function App() {
   const [renderError, setRenderError] = useState('')
   const [providerResult, setProviderResult] = useState<ProviderRenderResult | null>(null)
   const [hostInfo, setHostInfo] = useState<StudioHostInfo | null>(null)
+  const [trendStatus, setTrendStatus] = useState<TrendScoutStatus | null>(null)
+  const [trendProfileId, setTrendProfileId] = useState<TrendAppProfileId>('snapglp')
+  const [trendProviderId, setTrendProviderId] = useState<TrendScoutProviderId>('apify-tiktok')
+  const [trendQuery, setTrendQuery] = useState(profileQueryValue('snapglp'))
+  const [trendSort, setTrendSort] = useState<TrendScoutSort>('score')
+  const [trendMinViews, setTrendMinViews] = useState(50000)
+  const [trendLimit, setTrendLimit] = useState(24)
+  const [trendResult, setTrendResult] = useState<TrendScoutResult | null>(null)
+  const [selectedTrendPostId, setSelectedTrendPostId] = useState('')
+  const [trendBrief, setTrendBrief] = useState<TrendAdaptationBrief | null>(null)
+  const [isTrendLoading, setIsTrendLoading] = useState(false)
+  const [trendError, setTrendError] = useState('')
 
   useEffect(() => {
     window.studioHost?.getHostInfo().then(setHostInfo).catch(() => setHostInfo(null))
     window.studioHost?.getEngineCapabilities().then(setEngineCapabilities).catch(() => setEngineCapabilities(null))
+    window.studioHost?.getTrendScoutStatus?.().then(setTrendStatus).catch(() => setTrendStatus(null))
   }, [])
 
   useEffect(() => {
@@ -107,6 +151,89 @@ function App() {
   const readyToRender =
     Boolean(referenceFacePath) &&
     Boolean(sourceVideoPath || (sourceUrl && sourceAnalysis?.ok))
+  const sortedTrendPosts = useMemo(
+    () => sortTrendPosts((trendResult?.posts ?? []) as TrendPost[], trendSort),
+    [trendResult, trendSort],
+  )
+  const selectedTrendPost =
+    sortedTrendPosts.find((post) => post.id === selectedTrendPostId) ?? sortedTrendPosts[0] ?? null
+
+  function refreshTrendStatus() {
+    window.studioHost?.getTrendScoutStatus?.().then(setTrendStatus).catch(() => setTrendStatus(null))
+  }
+
+  function handleTrendProfileChange(profileId: TrendAppProfileId) {
+    setTrendProfileId(profileId)
+    setTrendQuery(profileQueryValue(profileId))
+    setTrendResult(null)
+    setSelectedTrendPostId('')
+    setTrendBrief(null)
+    setTrendError('')
+  }
+
+  async function runTrendSearch() {
+    if (!window.studioHost?.runTrendScout) {
+      setTrendError('This CopyTok build does not expose the Trend Scout backend yet.')
+      return
+    }
+    setIsTrendLoading(true)
+    setTrendError('')
+    setTrendBrief(null)
+    try {
+      const result = (await window.studioHost.runTrendScout({
+        appProfileId: trendProfileId,
+        providerId: trendProviderId,
+        query: trendQuery,
+        sort: trendSort,
+        limit: trendLimit,
+        minViews: trendMinViews,
+      })) as TrendScoutResult
+      setTrendResult(result)
+      setSelectedTrendPostId(result.posts[0]?.id ?? '')
+      if (!result.ok) setTrendError(result.message || 'Trend Scout could not return live results.')
+      refreshTrendStatus()
+    } catch (error) {
+      setTrendError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsTrendLoading(false)
+    }
+  }
+
+  async function createTrendBrief(post: TrendPost) {
+    if (!window.studioHost?.createTrendAdaptation) return
+    setTrendError('')
+    try {
+      const brief = (await window.studioHost.createTrendAdaptation({
+        appProfileId: trendProfileId,
+        post,
+      })) as TrendAdaptationBrief
+      setTrendBrief(brief)
+      setSelectedTrendPostId(post.id)
+      refreshTrendStatus()
+    } catch (error) {
+      setTrendError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function sendTrendToComposer(post: TrendPost) {
+    if (!post.url) {
+      setTrendError('This demo seed does not have a real source URL. Use a live result or paste your own source post.')
+      return
+    }
+    setSourceUrl(post.url)
+    setSourceVideo('')
+    setSourceVideoPath('')
+    setSourcePreview((existingPreview) => {
+      if (existingPreview) URL.revokeObjectURL(existingPreview)
+      return null
+    })
+    setSourceAnalysis(null)
+    setPreparedSource(null)
+    setRenderPacket(null)
+    setProviderResult(null)
+    setRenderError('')
+    setActiveNav('Projects')
+  }
 
   function desktopFilePath(file: File) {
     return (window.studioHost?.getFilePath?.(file) || (file as File & { path?: string }).path || '').trim()
@@ -353,148 +480,178 @@ function App() {
         </div>
       </header>
 
-      <section className="hero-flow">
-        <p className="micro-label">Local AI UGC workflow</p>
-        <h1>Clone any social post.</h1>
-        <p className="hero-copy">
-          Generate a persona, fetch a permitted source post, and route the action clone through your chosen engine.
-        </p>
-
-        <section className="swap-cards" aria-label="Swap inputs">
-          <UploadCard
-            accent="teal"
-            title="Avatar photo"
-            subtitle="Upload or generate the face you want in the video"
-            dropLabel="Drop image here"
-            dropMeta="PNG, JPG up to 20MB"
-            accept="image/*"
-            icon={<Image size={24} />}
-            fileName={referenceFace}
-            preview={referencePreview}
-            onFile={handleReferenceUpload}
-            footer={
-              <button className="ghost-button" type="button" onClick={openAvatarGenerator}>
-                <WandSparkles size={15} />
-                Generate AI avatar
-              </button>
-            }
+      <section className={activeNav === 'Trend Scout' ? 'hero-flow trend-flow' : 'hero-flow'}>
+        {activeNav === 'Trend Scout' ? (
+          <TrendScoutWorkspace
+            status={trendStatus}
+            profileId={trendProfileId}
+            providerId={trendProviderId}
+            query={trendQuery}
+            sort={trendSort}
+            minViews={trendMinViews}
+            limit={trendLimit}
+            result={trendResult}
+            posts={sortedTrendPosts}
+            selectedPost={selectedTrendPost}
+            brief={trendBrief}
+            error={trendError}
+            isLoading={isTrendLoading}
+            onProfileChange={handleTrendProfileChange}
+            onProviderChange={setTrendProviderId}
+            onQueryChange={setTrendQuery}
+            onSortChange={setTrendSort}
+            onMinViewsChange={setTrendMinViews}
+            onLimitChange={setTrendLimit}
+            onRun={runTrendSearch}
+            onSelectPost={setSelectedTrendPostId}
+            onCreateBrief={createTrendBrief}
+            onSendToComposer={sendTrendToComposer}
           />
+        ) : (
+          <>
+            <p className="micro-label">Local AI UGC workflow</p>
+            <h1>Clone any social post.</h1>
+            <p className="hero-copy">
+              Generate a persona, fetch a permitted source post, and route the action clone through your chosen engine.
+            </p>
 
-          <div className="swap-arrow" aria-hidden="true">
-            ⇄
-          </div>
+            <section className="swap-cards" aria-label="Swap inputs">
+              <UploadCard
+                accent="teal"
+                title="Avatar photo"
+                subtitle="Upload or generate the face you want in the video"
+                dropLabel="Drop image here"
+                dropMeta="PNG, JPG up to 20MB"
+                accept="image/*"
+                icon={<Image size={24} />}
+                fileName={referenceFace}
+                preview={referencePreview}
+                onFile={handleReferenceUpload}
+                footer={
+                  <button className="ghost-button" type="button" onClick={openAvatarGenerator}>
+                    <WandSparkles size={15} />
+                    Generate AI avatar
+                  </button>
+                }
+              />
 
-          <UploadCard
-            accent="violet"
-            title="Source video"
-            subtitle="Upload an acted-out template or analyze a permitted social link"
-            dropLabel="Drop video here"
-            dropMeta="MP4, MOV up to 500MB"
-            accept="video/mp4,video/quicktime,video/*"
-            icon={<Play size={24} />}
-            fileName={sourceVideo}
-            preview={sourcePreview}
-            onFile={handleSourceUpload}
-            footer={
-              <div className="link-input">
-                <span>OR PASTE LINK</span>
-                <label>
-                  <Link size={15} />
-                  <input
-                    value={sourceUrl}
-                    onChange={(event) => handleSourceUrlChange(event.target.value)}
-                    placeholder="TikTok, Instagram, YouTube Short, or source URL"
-                  />
-                </label>
-                <button
-                  className="analyze-button"
-                  type="button"
-                  disabled={!sourceUrl.trim() || isAnalyzingSource}
-                  onClick={analyzeSourceLink}
-                >
-                  <RefreshCw size={14} className={isAnalyzingSource ? 'spinning' : ''} />
-                  {isAnalyzingSource ? 'Fetching post' : 'Analyze link'}
-                </button>
+              <div className="swap-arrow" aria-hidden="true">
+                ⇄
               </div>
-            }
-          />
-        </section>
 
-        <SourceInsight
-          analysis={sourceAnalysis}
-          sourceUrl={sourceUrl}
-          isAnalyzing={isAnalyzingSource}
-          isPreparing={isPreparingSource}
-          preparedSource={preparedSource}
-          onPrepare={prepareSourceLink}
-        />
+              <UploadCard
+                accent="violet"
+                title="Source video"
+                subtitle="Upload an acted-out template or analyze a permitted social link"
+                dropLabel="Drop video here"
+                dropMeta="MP4, MOV up to 500MB"
+                accept="video/mp4,video/quicktime,video/*"
+                icon={<Play size={24} />}
+                fileName={sourceVideo}
+                preview={sourcePreview}
+                onFile={handleSourceUpload}
+                footer={
+                  <div className="link-input">
+                    <span>OR PASTE LINK</span>
+                    <label>
+                      <Link size={15} />
+                      <input
+                        value={sourceUrl}
+                        onChange={(event) => handleSourceUrlChange(event.target.value)}
+                        placeholder="TikTok, Instagram, YouTube Short, or source URL"
+                      />
+                    </label>
+                    <button
+                      className="analyze-button"
+                      type="button"
+                      disabled={!sourceUrl.trim() || isAnalyzingSource}
+                      onClick={analyzeSourceLink}
+                    >
+                      <RefreshCw size={14} className={isAnalyzingSource ? 'spinning' : ''} />
+                      {isAnalyzingSource ? 'Fetching post' : 'Analyze link'}
+                    </button>
+                  </div>
+                }
+              />
+            </section>
 
-        <section className="control-panel" aria-label="Render controls">
-          <div className="provider-block">
-            <ProviderChips
-              providerId={providerId}
-              capabilities={engineCapabilities}
-              onChange={setProviderId}
+            <SourceInsight
+              analysis={sourceAnalysis}
+              sourceUrl={sourceUrl}
+              isAnalyzing={isAnalyzingSource}
+              isPreparing={isPreparingSource}
+              preparedSource={preparedSource}
+              onPrepare={prepareSourceLink}
             />
-            <small>{selectedProvider.bestFor}</small>
-          </div>
 
-          <div className="output-block">
-            <span>Output</span>
-            <label className="control-label">Aspect ratio</label>
-            <SegmentedControl
-              options={['9:16', '1:1', '16:9']}
-              value={preset.aspectRatio}
-              onChange={(aspectRatio) =>
-                setPreset((current) => ({ ...current, aspectRatio: aspectRatio as RenderPreset['aspectRatio'] }))
-              }
+            <section className="control-panel" aria-label="Render controls">
+              <div className="provider-block">
+                <ProviderChips
+                  providerId={providerId}
+                  capabilities={engineCapabilities}
+                  onChange={setProviderId}
+                />
+                <small>{selectedProvider.bestFor}</small>
+              </div>
+
+              <div className="output-block">
+                <span>Output</span>
+                <label className="control-label">Aspect ratio</label>
+                <SegmentedControl
+                  options={['9:16', '1:1', '16:9']}
+                  value={preset.aspectRatio}
+                  onChange={(aspectRatio) =>
+                    setPreset((current) => ({ ...current, aspectRatio: aspectRatio as RenderPreset['aspectRatio'] }))
+                  }
+                />
+                <label className="control-label">Resolution</label>
+                <SegmentedControl
+                  options={['720p', '1080p']}
+                  value={preset.resolution}
+                  onChange={(resolution) =>
+                    setPreset((current) => ({ ...current, resolution: resolution as RenderPreset['resolution'] }))
+                  }
+                />
+              </div>
+
+              <button
+                className="generate-button"
+                type="button"
+                disabled={!readyToRender || isPreparingSource || isCreatingPacket || isRenderingProvider}
+                onClick={startRenderJob}
+              >
+                <Sparkles size={18} />
+                {isRenderingProvider
+                  ? 'Rendering on fal'
+                  : isPreparingSource || isCreatingPacket
+                    ? 'Preparing Engine Packet'
+                    : 'Generate Swap'}
+              </button>
+              {!readyToRender && (
+                <p className="render-hint">
+                  <CircleAlert size={15} />
+                  Add an avatar and upload a video or analyze a link.
+                </p>
+              )}
+              {renderError && (
+                <p className="render-error">
+                  <CircleAlert size={15} />
+                  {renderError}
+                </p>
+              )}
+            </section>
+
+            <EngineStackPanel capabilities={engineCapabilities} renderPacket={renderPacket} />
+
+            <QueuePanel
+              job={activeJob}
+              jobs={jobs}
+              sourcePreview={sourcePreview}
+              outputPreview={providerResult?.outputUrl ?? activeJob?.providerRender?.outputUrl ?? null}
+              hostInfo={hostInfo}
             />
-            <label className="control-label">Resolution</label>
-            <SegmentedControl
-              options={['720p', '1080p']}
-              value={preset.resolution}
-              onChange={(resolution) =>
-                setPreset((current) => ({ ...current, resolution: resolution as RenderPreset['resolution'] }))
-              }
-            />
-          </div>
-
-          <button
-            className="generate-button"
-            type="button"
-            disabled={!readyToRender || isPreparingSource || isCreatingPacket || isRenderingProvider}
-            onClick={startRenderJob}
-          >
-            <Sparkles size={18} />
-            {isRenderingProvider
-              ? 'Rendering on fal'
-              : isPreparingSource || isCreatingPacket
-                ? 'Preparing Engine Packet'
-                : 'Generate Swap'}
-          </button>
-          {!readyToRender && (
-            <p className="render-hint">
-              <CircleAlert size={15} />
-              Add an avatar and upload a video or analyze a link.
-            </p>
-          )}
-          {renderError && (
-            <p className="render-error">
-              <CircleAlert size={15} />
-              {renderError}
-            </p>
-          )}
-        </section>
-
-        <EngineStackPanel capabilities={engineCapabilities} renderPacket={renderPacket} />
-
-        <QueuePanel
-          job={activeJob}
-          jobs={jobs}
-          sourcePreview={sourcePreview}
-          outputPreview={providerResult?.outputUrl ?? activeJob?.providerRender?.outputUrl ?? null}
-          hostInfo={hostInfo}
-        />
+          </>
+        )}
       </section>
     </main>
   )
@@ -587,6 +744,423 @@ function ProviderChips({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function TrendScoutWorkspace({
+  status,
+  profileId,
+  providerId,
+  query,
+  sort,
+  minViews,
+  limit,
+  result,
+  posts,
+  selectedPost,
+  brief,
+  error,
+  isLoading,
+  onProfileChange,
+  onProviderChange,
+  onQueryChange,
+  onSortChange,
+  onMinViewsChange,
+  onLimitChange,
+  onRun,
+  onSelectPost,
+  onCreateBrief,
+  onSendToComposer,
+}: {
+  status: TrendScoutStatus | null
+  profileId: TrendAppProfileId
+  providerId: TrendScoutProviderId
+  query: string
+  sort: TrendScoutSort
+  minViews: number
+  limit: number
+  result: TrendScoutResult | null
+  posts: TrendPost[]
+  selectedPost: TrendPost | null
+  brief: TrendAdaptationBrief | null
+  error: string
+  isLoading: boolean
+  onProfileChange: (profileId: TrendAppProfileId) => void
+  onProviderChange: (providerId: TrendScoutProviderId) => void
+  onQueryChange: (query: string) => void
+  onSortChange: (sort: TrendScoutSort) => void
+  onMinViewsChange: (minViews: number) => void
+  onLimitChange: (limit: number) => void
+  onRun: () => void
+  onSelectPost: (postId: string) => void
+  onCreateBrief: (post: TrendPost) => void
+  onSendToComposer: (post: TrendPost) => void
+}) {
+  const profile = getTrendAppProfile(profileId)
+  const liveProvider = status?.providers.find((item) => item.id === 'apify-tiktok')
+  const providerOptions = trendScoutProviderOptions.map((provider) => ({
+    ...provider,
+    ...(status?.providers.find((item) => item.id === provider.id) ?? {}),
+  }))
+
+  return (
+    <>
+      <p className="micro-label">Trend intelligence</p>
+      <h1>Find proven formats.</h1>
+      <p className="hero-copy">
+        Search real TikTok trend evidence, rank useful formats, and turn winners into CopyTok production briefs.
+      </p>
+
+      <section className="trend-console" aria-label="Trend Scout">
+        <div className="trend-control-panel">
+          <div className="trend-control-heading">
+            <div>
+              <span>App lane</span>
+              <strong>{profile.name}</strong>
+            </div>
+            <div className="trend-status-pill">
+              <Database size={15} />
+              {status?.cache.postCount ?? 0} saved posts
+            </div>
+          </div>
+
+          <div className="app-profile-chips" aria-label="Andromeda app profiles">
+            {trendAppProfiles.map((appProfile) => (
+              <button
+                key={appProfile.id}
+                className={profileId === appProfile.id ? 'selected' : ''}
+                type="button"
+                onClick={() => onProfileChange(appProfile.id)}
+              >
+                {appProfile.id === 'snapglp' ? <HeartPulse size={18} /> : <AudioWaveform size={18} />}
+                <strong>{appProfile.name}</strong>
+                <span>{appProfile.category}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="trend-provider-row" aria-label="Trend provider">
+            {providerOptions.map((provider) => (
+              <button
+                key={provider.id}
+                className={providerId === provider.id ? 'selected' : ''}
+                type="button"
+                onClick={() => onProviderChange(provider.id)}
+                title={provider.role}
+              >
+                {provider.id === 'apify-tiktok' ? <TrendingUp size={16} /> : <Activity size={16} />}
+                <strong>{provider.label}</strong>
+                <span>{provider.status === 'ready' ? 'Ready' : provider.secretName ? `Needs ${provider.secretName}` : provider.status}</span>
+              </button>
+            ))}
+          </div>
+
+          <label className="trend-search-box">
+            <span>Search brief</span>
+            <div>
+              <Search size={17} />
+              <input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                placeholder="guitar tone app, GLP-1 meal tracking, viral hook..."
+              />
+            </div>
+          </label>
+
+          <div className="trend-filter-row">
+            <TrendSelect
+              icon={<SlidersHorizontal size={15} />}
+              label="Sort"
+              value={sort}
+              options={trendSortOptions}
+              onChange={(value) => onSortChange(value as TrendScoutSort)}
+            />
+            <TrendSelect
+              icon={<BarChart3 size={15} />}
+              label="Min views"
+              value={String(minViews)}
+              options={[
+                { id: '0', label: 'Any' },
+                { id: '50000', label: '50K+' },
+                { id: '100000', label: '100K+' },
+                { id: '500000', label: '500K+' },
+                { id: '1000000', label: '1M+' },
+              ]}
+              onChange={(value) => onMinViewsChange(Number(value))}
+            />
+            <TrendSelect
+              icon={<Gauge size={15} />}
+              label="Limit"
+              value={String(limit)}
+              options={[
+                { id: '12', label: '12' },
+                { id: '24', label: '24' },
+                { id: '48', label: '48' },
+              ]}
+              onChange={(value) => onLimitChange(Number(value))}
+            />
+          </div>
+
+          <button className="trend-run-button" type="button" disabled={isLoading} onClick={onRun}>
+            <Sparkles size={18} className={isLoading ? 'spinning' : ''} />
+            {isLoading ? 'Searching Trends' : 'Run Trend Scout'}
+          </button>
+
+          <div className={liveProvider?.status === 'ready' ? 'trend-provider-note ready' : 'trend-provider-note'}>
+            <ShieldCheck size={15} />
+            <span>
+              {liveProvider?.status === 'ready'
+                ? 'Live TikTok discovery is active. Results are saved to the local Adventure runtime database.'
+                : 'Live discovery needs APIFY_TOKEN. Demo mode is labeled and should not be treated as market evidence.'}
+            </span>
+          </div>
+        </div>
+
+        <div className="trend-results-panel">
+          <div className="trend-results-heading">
+            <div>
+              <span>Results</span>
+              <strong>{posts.length ? `${posts.length} formats found` : 'No run yet'}</strong>
+            </div>
+            {result?.databasePath ? (
+              <div className="trend-path-pill" title={result.databasePath}>
+                <Database size={14} />
+                Local DB
+              </div>
+            ) : null}
+          </div>
+
+          {error ? (
+            <p className="trend-alert">
+              <CircleAlert size={15} />
+              {error}
+            </p>
+          ) : null}
+
+          {result?.warnings?.map((warning) => (
+            <p className="trend-alert subtle" key={warning}>
+              <CircleAlert size={15} />
+              {warning}
+            </p>
+          ))}
+
+          {posts.length ? (
+            <div className="trend-grid">
+              {posts.map((post) => (
+                <TrendResultCard
+                  key={post.id}
+                  post={post}
+                  selected={selectedPost?.id === post.id}
+                  onSelect={() => onSelectPost(post.id)}
+                  onCreateBrief={() => onCreateBrief(post)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="trend-empty">
+              <Target size={28} />
+              <strong>Choose an app lane and run a scout pass.</strong>
+              <span>Apify returns live TikTok evidence once the token is present. Local demo mode only tests the workflow.</span>
+            </div>
+          )}
+        </div>
+
+        <TrendBriefPanel
+          post={selectedPost}
+          brief={brief}
+          onCreateBrief={onCreateBrief}
+          onSendToComposer={onSendToComposer}
+        />
+      </section>
+    </>
+  )
+}
+
+function TrendSelect({
+  icon,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  options: Array<{ id: string; label: string }>
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="trend-select">
+      <span>
+        {icon}
+        {label}
+      </span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function TrendResultCard({
+  post,
+  selected,
+  onSelect,
+  onCreateBrief,
+}: {
+  post: TrendPost
+  selected: boolean
+  onSelect: () => void
+  onCreateBrief: () => void
+}) {
+  return (
+    <article className={selected ? 'trend-card selected' : 'trend-card'} onClick={onSelect}>
+      <div className="trend-card-top">
+        <span className={post.sourceKind === 'real-scrape' ? 'source-kind live' : 'source-kind demo'}>
+          {post.sourceKind === 'real-scrape' ? 'Live source' : 'Demo seed'}
+        </span>
+        <strong>{post.score.composite}</strong>
+      </div>
+      <h2>{post.format.hookType}</h2>
+      <p>{post.text || post.format.firstThreeSeconds}</p>
+      <div className="trend-metrics">
+        <span>
+          <TrendingUp size={14} />
+          {formatMetric(post.stats.views)}
+        </span>
+        <span>
+          <MousePointerClick size={14} />
+          {engagementPercent(post)}
+        </span>
+        <span>
+          <Share2 size={14} />
+          {formatMetric(post.stats.shares)}
+        </span>
+      </div>
+      <div className="trend-fingerprint">
+        <span>{post.format.textOverlay}</span>
+        <small>{post.format.visualBeat}</small>
+      </div>
+      <div className="trend-card-actions">
+        <button type="button" onClick={(event) => { event.stopPropagation(); onCreateBrief() }}>
+          <CopyCheck size={15} />
+          Adapt
+        </button>
+        {post.url ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              window.studioHost?.openExternal(post.url)
+            }}
+          >
+            <ExternalLink size={15} />
+            Open
+          </button>
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
+function TrendBriefPanel({
+  post,
+  brief,
+  onCreateBrief,
+  onSendToComposer,
+}: {
+  post: TrendPost | null
+  brief: TrendAdaptationBrief | null
+  onCreateBrief: (post: TrendPost) => void
+  onSendToComposer: (post: TrendPost) => void
+}) {
+  if (!post) {
+    return (
+      <aside className="trend-brief-panel">
+        <span>Adaptation brief</span>
+        <div className="trend-empty brief">
+          <FileText size={25} />
+          <strong>Select a format.</strong>
+          <small>The brief will keep the winning structure tight while swapping in the Andromeda app truth.</small>
+        </div>
+      </aside>
+    )
+  }
+
+  const activeBrief = brief?.postId === post.id ? brief : null
+
+  return (
+    <aside className="trend-brief-panel">
+      <span>Adaptation brief</span>
+      <h2>{activeBrief?.title ?? post.format.hookType}</h2>
+      <p>{post.format.firstThreeSeconds}</p>
+
+      <div className="brief-score-row">
+        <BriefScore label="Score" value={post.score.composite} />
+        <BriefScore label="Outlier" value={post.score.outlier} />
+        <BriefScore label="Fit" value={post.score.fidelity} />
+      </div>
+
+      {activeBrief ? (
+        <>
+          <div className="brief-block">
+            <strong>Fidelity rule</strong>
+            <span>{activeBrief.mimicPlan.fidelityRule}</span>
+          </div>
+          <div className="brief-block">
+            <strong>On-screen text</strong>
+            {activeBrief.mimicPlan.onscreenText.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+          </div>
+          <div className="brief-block">
+            <strong>Beat sheet</strong>
+            {activeBrief.mimicPlan.beatSheet.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+          </div>
+          <div className="brief-actions">
+            <button type="button" disabled={!post.url} onClick={() => onSendToComposer(post)}>
+              <Play size={15} />
+              Use source
+            </button>
+            {activeBrief.savedPath ? <small title={activeBrief.savedPath}>Saved locally</small> : null}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="brief-block">
+            <strong>Copy tightly</strong>
+            <span>{post.format.visualBeat}</span>
+            <span>{post.format.creatorAction}</span>
+            <span>{post.format.productInsertion}</span>
+          </div>
+          <div className="brief-actions">
+            <button type="button" onClick={() => onCreateBrief(post)}>
+              <CopyCheck size={15} />
+              Create brief
+            </button>
+            <button type="button" disabled={!post.url} onClick={() => onSendToComposer(post)}>
+              <Play size={15} />
+              Use source
+            </button>
+          </div>
+        </>
+      )}
+    </aside>
+  )
+}
+
+function BriefScore({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <strong>{Math.round(value)}</strong>
+      <span>{label}</span>
     </div>
   )
 }

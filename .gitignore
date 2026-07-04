@@ -12,6 +12,10 @@ dist
 dist-ssr
 release
 *.local
+.local-runtime
+local-runtime
+*.sqlite
+*.sqlite3
 
 # Editor directories and files
 .vscode/*

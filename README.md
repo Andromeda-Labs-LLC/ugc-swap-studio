@@ -14,6 +14,7 @@ This project is a clean-room workflow clone of public-facing face-swap creator t
 - Caption/transcript extraction when source captions are available.
 - Local Whisper transcript fallback when `whisper.cpp` and a model are available.
 - Audio/voice readiness reporting with consent warnings.
+- Trend Scout module for app-specific TikTok format discovery, ranking, and adaptation briefs.
 - Rights, consent, and AI-disclosure guardrail checks.
 - Provider-neutral render routing.
 - Mock local renderer that simulates queue progress.
@@ -54,6 +55,7 @@ Renderer UI code should never call vendor APIs directly. Add real video provider
 
 See [docs/provider-routing.md](docs/provider-routing.md).
 See [docs/engine-harness.md](docs/engine-harness.md).
+See [docs/trend-scout.md](docs/trend-scout.md).
 
 ## Guardrails
 

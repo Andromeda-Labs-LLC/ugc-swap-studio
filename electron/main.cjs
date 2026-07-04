@@ -3,11 +3,14 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const {
   analyzeSourceUrl,
+  createTrendAdaptation,
   createRenderPacket,
   getEngineCapabilities,
+  getTrendScoutStatus,
   prepareSourceFile,
   prepareSourceUrl,
   renderWithProvider,
+  runTrendScout,
 } = require('./engine.cjs');
 
 const isDev = !app.isPackaged;
@@ -58,6 +61,13 @@ app.whenReady().then(() => {
 
   ipcMain.handle('studio:get-engine-capabilities', () => getEngineCapabilities(path.join(__dirname, '..')));
 
+  ipcMain.handle('studio:get-trend-scout-status', () =>
+    getTrendScoutStatus({
+      userDataPath: app.getPath('userData'),
+      appRoot: path.join(__dirname, '..'),
+    }),
+  );
+
   ipcMain.handle('studio:analyze-source-url', (_event, rawUrl) => analyzeSourceUrl(rawUrl));
 
   ipcMain.handle('studio:prepare-source-url', (_event, rawUrl) =>
@@ -82,6 +92,20 @@ app.whenReady().then(() => {
 
   ipcMain.handle('studio:render-with-provider', (_event, input) =>
     renderWithProvider(input, {
+      userDataPath: app.getPath('userData'),
+      appRoot: path.join(__dirname, '..'),
+    }),
+  );
+
+  ipcMain.handle('studio:run-trend-scout', (_event, input) =>
+    runTrendScout(input, {
+      userDataPath: app.getPath('userData'),
+      appRoot: path.join(__dirname, '..'),
+    }),
+  );
+
+  ipcMain.handle('studio:create-trend-adaptation', (_event, input) =>
+    createTrendAdaptation(input, {
       userDataPath: app.getPath('userData'),
       appRoot: path.join(__dirname, '..'),
     }),
