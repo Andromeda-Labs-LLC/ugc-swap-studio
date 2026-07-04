@@ -15,15 +15,27 @@ const APIFY_KEYCHAIN_ACCOUNT = 'APIFY_TOKEN';
 const ADVENTURE_PROJECT_ROOT = '/Volumes/Adventure/Andromeda Labs/SaaS/UGC Swap Studio';
 const MARKETING_OUTPUT_ROOT = '/Volumes/Adventure/Andromeda Labs/Marketing/CopyTok';
 const SCOUT_DB_VERSION = 1;
+const DEFAULT_BYTEPLUS_BASE_URL = 'https://ark.ap-southeast.bytepluses.com/api/v3';
+const DEFAULT_SEEDANCE_MODEL = 'dreamina-seedance-2-0-260128';
+const DEFAULT_KLING_MODEL = 'kling-v3.0-motion-control';
+const MAX_INLINE_REFERENCE_VIDEO_BYTES = 96 * 1024 * 1024;
 
 const PROVIDER_SECRETS = {
   klingApiKey: 'KLING_API_KEY',
+  klingAccessKey: 'KLING_ACCESS_KEY',
+  klingSecretKey: 'KLING_SECRET_KEY',
+  klingAiAccessKey: 'KLINGAI_ACCESS_KEY',
+  klingAiSecretKey: 'KLINGAI_SECRET_KEY',
+  klingBaseUrl: 'KLING_BASE_URL',
+  klingModel: 'KLING_MODEL',
   klingCreateUrl: 'KLING_CREATE_URL',
   klingStatusUrlTemplate: 'KLING_STATUS_URL_TEMPLATE',
+  arkApiKey: 'ARK_API_KEY',
   seedanceApiKey: 'SEEDANCE_API_KEY',
   seedanceBaseUrl: 'SEEDANCE_API_BASE_URL',
   seedanceCreateUrl: 'SEEDANCE_CREATE_URL',
   seedanceStatusUrlTemplate: 'SEEDANCE_STATUS_URL_TEMPLATE',
+  seedanceModel: 'SEEDANCE_MODEL',
   byteplusApiKey: 'BYTEPLUS_API_KEY',
   openAiApiKey: 'OPENAI_API_KEY',
 };
@@ -124,8 +136,26 @@ function resolveSecret(account) {
   return process.env[account] || readKeychainSecret(COPYTOK_KEYCHAIN_SERVICE, account);
 }
 
+function firstSecret(accounts) {
+  for (const account of accounts) {
+    const value = resolveSecret(account);
+    if (value) return value;
+  }
+  return '';
+}
+
 function hasSecret(account) {
   return Boolean(resolveSecret(account));
+}
+
+function resolveKlingCredentials() {
+  const accessKey = firstSecret([PROVIDER_SECRETS.klingAccessKey, PROVIDER_SECRETS.klingAiAccessKey]);
+  const secretKey = firstSecret([PROVIDER_SECRETS.klingSecretKey, PROVIDER_SECRETS.klingAiSecretKey]);
+  return { accessKey, secretKey };
+}
+
+function resolveSeedanceApiKey() {
+  return firstSecret([PROVIDER_SECRETS.arkApiKey, PROVIDER_SECRETS.seedanceApiKey, PROVIDER_SECRETS.byteplusApiKey]);
 }
 
 function resolveFalKey() {
@@ -153,17 +183,13 @@ function heygenCliStatus() {
 }
 
 function directKlingStatus() {
-  if (!hasSecret(PROVIDER_SECRETS.klingApiKey)) return 'missing-secret';
-  return hasSecret(PROVIDER_SECRETS.klingCreateUrl) ? 'adapter-ready' : 'needs-config';
+  const { accessKey, secretKey } = resolveKlingCredentials();
+  if (!accessKey || !secretKey) return 'missing-secret';
+  return 'adapter-ready';
 }
 
 function directSeedanceStatus() {
-  if (!hasSecret(PROVIDER_SECRETS.seedanceApiKey) && !hasSecret(PROVIDER_SECRETS.byteplusApiKey)) {
-    return 'missing-secret';
-  }
-  return hasSecret(PROVIDER_SECRETS.seedanceCreateUrl) || hasSecret(PROVIDER_SECRETS.seedanceBaseUrl)
-    ? 'adapter-ready'
-    : 'needs-config';
+  return resolveSeedanceApiKey() ? 'adapter-ready' : 'missing-secret';
 }
 
 function openAiImageStatus() {
@@ -175,15 +201,14 @@ function nextRequiredSecretForProvider(providerId) {
     return 'FAL_KEY in the CopyTok macOS Keychain entry or secure environment';
   }
   if (providerId === 'direct-kling-3') {
-    if (!hasSecret(PROVIDER_SECRETS.klingApiKey)) return 'KLING_API_KEY in the CopyTok macOS Keychain entry';
-    if (!hasSecret(PROVIDER_SECRETS.klingCreateUrl)) return 'KLING_CREATE_URL for the direct Kling image-to-video task endpoint';
+    const { accessKey, secretKey } = resolveKlingCredentials();
+    if (!accessKey || !secretKey) {
+      return 'KLING_ACCESS_KEY and KLING_SECRET_KEY in the CopyTok macOS Keychain entry';
+    }
   }
   if (providerId === 'direct-seedance-2') {
-    if (!hasSecret(PROVIDER_SECRETS.seedanceApiKey) && !hasSecret(PROVIDER_SECRETS.byteplusApiKey)) {
-      return 'SEEDANCE_API_KEY or BYTEPLUS_API_KEY in the CopyTok macOS Keychain entry';
-    }
-    if (!hasSecret(PROVIDER_SECRETS.seedanceCreateUrl) && !hasSecret(PROVIDER_SECRETS.seedanceBaseUrl)) {
-      return 'SEEDANCE_CREATE_URL or SEEDANCE_API_BASE_URL for BytePlus ModelArk video generation';
+    if (!resolveSeedanceApiKey()) {
+      return 'ARK_API_KEY, SEEDANCE_API_KEY, or BYTEPLUS_API_KEY in the CopyTok macOS Keychain entry';
     }
   }
   if (providerId === 'openai-image-2' && !hasSecret(PROVIDER_SECRETS.openAiApiKey)) {
@@ -326,14 +351,14 @@ function getEngineCapabilities(appRoot) {
         id: 'direct-seedance-2',
         label: 'Direct Seedance 2.0',
         status: directSeedanceStatus(),
-        secretEnv: 'SEEDANCE_API_KEY / BYTEPLUS_API_KEY',
+        secretEnv: 'ARK_API_KEY / SEEDANCE_API_KEY / BYTEPLUS_API_KEY',
         role: 'Cost-first direct BytePlus ModelArk Seedance route for multimodal video generation.',
       },
       {
         id: 'direct-kling-3',
         label: 'Direct Kling 3.0',
         status: directKlingStatus(),
-        secretEnv: 'KLING_API_KEY',
+        secretEnv: 'KLING_ACCESS_KEY + KLING_SECRET_KEY',
         role: 'Cost-first direct Kling route for image-to-video jobs using first-frame avatar stills.',
       },
       {
@@ -1476,6 +1501,33 @@ function openAiImageSize(aspectRatio, resolution) {
   return resolution === '1080p' ? '1024x1792' : '1024x1536';
 }
 
+function videoResolution(aspectRatio, resolution) {
+  if (aspectRatio === '1:1') return resolution === '1080p' ? '1440x1440' : '960x960';
+  if (aspectRatio === '16:9') return resolution === '1080p' ? '1920x1080' : '1280x720';
+  return resolution === '1080p' ? '1080x1920' : '720x1280';
+}
+
+function providerDuration(input, preparedSource) {
+  const rawDuration = numeric(preparedSource?.metadata?.durationSeconds ?? preparedSource?.durationSeconds, 7);
+  if (!rawDuration) return 7;
+  return Math.min(15, Math.max(4, Math.round(rawDuration)));
+}
+
+async function readFileData(filePath, label) {
+  const resolvedPath = assertExistingFile(filePath, label);
+  return fsPromises.readFile(resolvedPath);
+}
+
+async function fileToDataUri(filePath, label, maxBytes = MAX_INLINE_REFERENCE_VIDEO_BYTES) {
+  const resolvedPath = assertExistingFile(filePath, label);
+  const stat = await fsPromises.stat(resolvedPath);
+  if (stat.size > maxBytes) {
+    throw new Error(`${label} is too large for inline direct-provider upload. Prepare a shorter source clip or use a URL-backed provider route.`);
+  }
+  const bytes = await fsPromises.readFile(resolvedPath);
+  return `data:${mimeTypeForFile(resolvedPath)};base64,${Buffer.from(bytes).toString('base64')}`;
+}
+
 function buildHeygenPrompt(input, variant) {
   const context = campaignContext(input);
   const transcript = input.preparedSource?.transcript?.text
@@ -1551,12 +1603,12 @@ function buildProviderPackets(input, packetId = 'packet') {
     finishingPlan: finishPlan,
     directSeedance2: {
       provider: 'byteplus-modelark',
-      model: 'seedance-2.0',
-      secretEnv: 'SEEDANCE_API_KEY or BYTEPLUS_API_KEY',
-      requiredConfig: ['SEEDANCE_CREATE_URL or SEEDANCE_API_BASE_URL', 'SEEDANCE_STATUS_URL_TEMPLATE for polling'],
+      model: resolveSecret(PROVIDER_SECRETS.seedanceModel) || DEFAULT_SEEDANCE_MODEL,
+      secretEnv: 'ARK_API_KEY, SEEDANCE_API_KEY, or BYTEPLUS_API_KEY',
+      requiredConfig: ['Optional SEEDANCE_API_BASE_URL override only when not using the default BytePlus global route'],
       mode: 'async-video-generation',
       requestTemplate: {
-        model: 'seedance-2.0',
+        model: resolveSecret(PROVIDER_SECRETS.seedanceModel) || DEFAULT_SEEDANCE_MODEL,
         prompt: '<variant-specific prompt>',
         negative_prompt: negativeVideoPrompt(input),
         inputs: {
@@ -1579,18 +1631,18 @@ function buildProviderPackets(input, packetId = 'packet') {
     },
     directKling3: {
       provider: 'kling-open-platform',
-      model: 'kling-3.0',
-      secretEnv: 'KLING_API_KEY',
-      requiredConfig: ['KLING_CREATE_URL', 'KLING_STATUS_URL_TEMPLATE for polling'],
-      mode: 'image_to_video',
+      model: resolveSecret(PROVIDER_SECRETS.klingModel) || DEFAULT_KLING_MODEL,
+      secretEnv: 'KLING_ACCESS_KEY and KLING_SECRET_KEY',
+      requiredConfig: ['Optional KLING_MODEL or KLING_BASE_URL override only when needed'],
+      mode: 'motion_control_or_image_to_video',
       requestTemplate: {
-        mode: 'image_to_video',
-        model: 'kling-3.0',
+        mode: 'motion_control',
+        model: resolveSecret(PROVIDER_SECRETS.klingModel) || DEFAULT_KLING_MODEL,
         reference_image: '<upload-or-provider-file-id-for-avatar-image>',
-        reference_video: '<optional-normalized-source-video-if-enabled-by-account-schema>',
+        reference_video: '<normalized-source-video-inline-or-url-reference>',
         prompt: '<variant-specific prompt>',
         negative_prompt: negativeVideoPrompt(input),
-        duration_seconds: 7,
+        duration_seconds: 'source-video-for-motion-control-or-4-to-15',
         resolution,
         aspect_ratio: aspectRatio,
         fps_preference: 'highest_native',
@@ -1836,8 +1888,8 @@ function providerLabel(providerId) {
 
 function modelForProvider(providerId) {
   if (FAL_PROVIDERS[providerId]) return FAL_PROVIDERS[providerId].model;
-  if (providerId === 'direct-seedance-2') return 'seedance-2.0';
-  if (providerId === 'direct-kling-3') return 'kling-3.0';
+  if (providerId === 'direct-seedance-2') return resolveSecret(PROVIDER_SECRETS.seedanceModel) || DEFAULT_SEEDANCE_MODEL;
+  if (providerId === 'direct-kling-3') return resolveSecret(PROVIDER_SECRETS.klingModel) || DEFAULT_KLING_MODEL;
   if (providerId === 'openai-image-2') return 'gpt-image-2';
   if (providerId === 'heygen-cloud') return 'video-agent-v3';
   return '';
@@ -2123,36 +2175,271 @@ async function renderWithOpenAiImage(input, options = {}) {
   };
 }
 
-async function renderWithDirectPacketOnly(input, options = {}) {
-  if (input.providerId === 'direct-kling-3') {
-    if (!hasSecret(PROVIDER_SECRETS.klingApiKey)) {
-      return blockedProviderResult(input, options, 'KLING_API_KEY is missing. Create a direct Kling API key, then store it in the CopyTok Keychain.');
-    }
-    if (!hasSecret(PROVIDER_SECRETS.klingCreateUrl)) {
-      return blockedProviderResult(
-        input,
-        options,
-        'Direct Kling credentials exist, but KLING_CREATE_URL is not configured. Add the exact account-console image-to-video task endpoint before live submission.',
-      );
-    }
+function generatedVideoBytes(result) {
+  const file = result?.video || result?.videos?.[0];
+  if (!file?.uint8Array) {
+    throw new Error('Provider completed but returned no downloadable video bytes.');
   }
-  if (input.providerId === 'direct-seedance-2') {
-    if (!hasSecret(PROVIDER_SECRETS.seedanceApiKey) && !hasSecret(PROVIDER_SECRETS.byteplusApiKey)) {
-      return blockedProviderResult(input, options, 'SEEDANCE_API_KEY or BYTEPLUS_API_KEY is missing. Create a BytePlus ModelArk Seedance API key, then store it in the CopyTok Keychain.');
-    }
-    if (!hasSecret(PROVIDER_SECRETS.seedanceCreateUrl) && !hasSecret(PROVIDER_SECRETS.seedanceBaseUrl)) {
-      return blockedProviderResult(
-        input,
-        options,
-        'Direct Seedance credentials exist, but SEEDANCE_CREATE_URL or SEEDANCE_API_BASE_URL is not configured. Add the exact ModelArk video-generation endpoint before live submission.',
-      );
-    }
+  return Buffer.from(file.uint8Array);
+}
+
+function aiSdkTaskId(result, providerKey, fallback) {
+  const metadata = result?.providerMetadata?.[providerKey] || {};
+  return metadata.taskId || metadata.id || fallback;
+}
+
+async function renderWithDirectSeedance(input, options = {}) {
+  const apiKey = resolveSeedanceApiKey();
+  if (!apiKey) {
+    return blockedProviderResult(input, options, 'ARK_API_KEY, SEEDANCE_API_KEY, or BYTEPLUS_API_KEY is missing. Create a BytePlus ModelArk Seedance API key, then store it in the CopyTok Keychain.');
   }
-  return blockedProviderResult(
-    input,
-    options,
-    'Direct provider packet is ready, but the provider upload/task client still needs the vendor-specific file upload and polling schema from the account console.',
-  );
+  const createdAt = new Date().toISOString();
+  const userDataPath = resolveRuntimeDir(options);
+  const appRoot = options.appRoot || '';
+  const referencePath = assertExistingFile(input.referenceFacePath, 'Avatar image');
+  const variants = requireRenderableVariants(input, referencePath);
+  const preparedSource =
+    input.preparedSource?.ok
+      ? input.preparedSource
+      : input.sourceVideoPath
+        ? await prepareSourceFile(input.sourceVideoPath, { userDataPath, appRoot })
+        : null;
+  const sourceVideoPath = preparedSource?.files?.normalizedVideo
+    ? assertExistingFile(preparedSource.files.normalizedVideo, 'Prepared source video')
+    : input.sourceVideoPath
+      ? assertExistingFile(input.sourceVideoPath, 'Source video')
+      : '';
+  const sourceVideoDataUri = sourceVideoPath ? await fileToDataUri(sourceVideoPath, 'Prepared source video') : '';
+  const audioDataUri =
+    preparedSource?.files?.audio && fs.existsSync(preparedSource.files.audio)
+      ? await fileToDataUri(preparedSource.files.audio, 'Prepared source audio', 24 * 1024 * 1024)
+      : '';
+  const { experimental_generateVideo: generateVideo } = await import('ai');
+  const { createByteDance } = await import('@ai-sdk/bytedance');
+  const model = resolveSecret(PROVIDER_SECRETS.seedanceModel) || DEFAULT_SEEDANCE_MODEL;
+  const baseURL = resolveSecret(PROVIDER_SECRETS.seedanceBaseUrl) || DEFAULT_BYTEPLUS_BASE_URL;
+  const byteDance = createByteDance({ apiKey, baseURL });
+  const batchRequestId = `seedance-${Date.now().toString(36)}`;
+  const outputDir = providerOutputDir(input, userDataPath, input.providerId, batchRequestId);
+  await fsPromises.mkdir(outputDir, { recursive: true });
+  const requests = [];
+  const variantResults = [];
+
+  try {
+    for (const variant of variants) {
+      const imageBytes = await readFileData(variant.localImagePath, `Video ${variant.slot} avatar image`);
+      const text = seedancePrompt({ ...input, preparedSource, activeVariant: variant });
+      const providerOptions = {
+        bytedance: {
+          watermark: false,
+          generateAudio: Boolean(audioDataUri),
+          referenceVideos: sourceVideoDataUri ? [sourceVideoDataUri] : [],
+          referenceAudio: audioDataUri ? [audioDataUri] : [],
+          pollIntervalMs: 5000,
+          pollTimeoutMs: 1000 * 60 * 18,
+        },
+      };
+      const requestSummary = {
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        model,
+        baseURL,
+        duration: providerDuration(input, preparedSource),
+        resolution: videoResolution(input.preset?.aspectRatio ?? '9:16', input.preset?.resolution ?? '720p'),
+        aspectRatio: input.preset?.aspectRatio ?? '9:16',
+        hasReferenceVideo: Boolean(sourceVideoDataUri),
+        hasReferenceAudio: Boolean(audioDataUri),
+        prompt: text,
+      };
+      requests.push(requestSummary);
+      const result = await generateVideo({
+        model: byteDance.video(model),
+        prompt: { image: imageBytes, text },
+        duration: requestSummary.duration,
+        resolution: requestSummary.resolution,
+        aspectRatio: requestSummary.aspectRatio,
+        generateAudio: Boolean(audioDataUri),
+        providerOptions,
+        maxRetries: 1,
+      });
+      const providerTaskId = aiSdkTaskId(result, 'bytedance', `${batchRequestId}-${variant.slot}`);
+      const outputPath = path.join(outputDir, `variant-${variant.slot}-${safeSlug(variant.avatarName)}.mp4`);
+      await fsPromises.writeFile(outputPath, generatedVideoBytes(result));
+      variantResults.push({
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        requestId: providerTaskId,
+        outputPath,
+        status: 'complete',
+      });
+    }
+  } catch (error) {
+    return blockedProviderResult(input, options, `Direct Seedance render failed: ${truncate(error?.message || String(error), 900)}`, {
+      model,
+      baseURL,
+      requests,
+    });
+  }
+
+  const providerPayloadPath = await writeProviderPayload(userDataPath, input.providerId, batchRequestId, {
+    createdAt,
+    providerId: input.providerId,
+    providerName: 'Direct Seedance 2.0',
+    model,
+    baseURL,
+    requestId: batchRequestId,
+    requests,
+    variants: variantResults,
+    outputDir,
+    preparedSourceRunId: preparedSource?.runId,
+    campaign: campaignContext(input),
+    finishingPlan: buildFinishPlan(input, batchRequestId, variants),
+  });
+  const firstVariant = variantResults[0];
+  return {
+    ok: true,
+    providerId: input.providerId,
+    providerName: 'Direct Seedance 2.0',
+    model,
+    status: 'complete',
+    requestId: batchRequestId,
+    outputPath: firstVariant?.outputPath,
+    providerPayloadPath,
+    variants: variantResults,
+    logs: ['Direct BytePlus ModelArk Seedance render completed.'],
+    createdAt,
+  };
+}
+
+async function renderWithDirectKling(input, options = {}) {
+  const { accessKey, secretKey } = resolveKlingCredentials();
+  if (!accessKey || !secretKey) {
+    return blockedProviderResult(input, options, 'KLING_ACCESS_KEY and KLING_SECRET_KEY are missing. Create direct Kling API credentials, then store both in the CopyTok Keychain.');
+  }
+  const createdAt = new Date().toISOString();
+  const userDataPath = resolveRuntimeDir(options);
+  const appRoot = options.appRoot || '';
+  const referencePath = assertExistingFile(input.referenceFacePath, 'Avatar image');
+  const variants = requireRenderableVariants(input, referencePath);
+  const preparedSource =
+    input.preparedSource?.ok
+      ? input.preparedSource
+      : input.sourceVideoPath
+        ? await prepareSourceFile(input.sourceVideoPath, { userDataPath, appRoot })
+        : null;
+  const sourceVideoPath = preparedSource?.files?.normalizedVideo
+    ? assertExistingFile(preparedSource.files.normalizedVideo, 'Prepared source video')
+    : input.sourceVideoPath
+      ? assertExistingFile(input.sourceVideoPath, 'Source video')
+      : '';
+  const sourceVideoDataUri = sourceVideoPath ? await fileToDataUri(sourceVideoPath, 'Prepared source video') : '';
+  const { experimental_generateVideo: generateVideo } = await import('ai');
+  const { createKlingAI } = await import('@ai-sdk/klingai');
+  const model = resolveSecret(PROVIDER_SECRETS.klingModel) || (sourceVideoDataUri ? DEFAULT_KLING_MODEL : 'kling-v3.0-i2v');
+  const baseURL = resolveSecret(PROVIDER_SECRETS.klingBaseUrl) || undefined;
+  const klingai = createKlingAI({ accessKey, secretKey, ...(baseURL ? { baseURL } : {}) });
+  const batchRequestId = `kling-${Date.now().toString(36)}`;
+  const outputDir = providerOutputDir(input, userDataPath, input.providerId, batchRequestId);
+  await fsPromises.mkdir(outputDir, { recursive: true });
+  const requests = [];
+  const variantResults = [];
+
+  try {
+    for (const variant of variants) {
+      const imageBytes = await readFileData(variant.localImagePath, `Video ${variant.slot} avatar image`);
+      const text = providerPrompt({ ...input, preparedSource }, variant);
+      const isMotionControl = model.includes('motion-control');
+      const providerOptions = {
+        klingai: isMotionControl
+          ? {
+              mode: 'pro',
+              videoUrl: sourceVideoDataUri,
+              characterOrientation: 'image',
+              keepOriginalSound: 'yes',
+              watermarkEnabled: false,
+              pollIntervalMs: 5000,
+              pollTimeoutMs: 1000 * 60 * 18,
+            }
+          : {
+              mode: input.preset?.resolution === '1080p' ? 'pro' : 'std',
+              negativePrompt: negativeVideoPrompt(input),
+              sound: 'off',
+              watermarkEnabled: false,
+              pollIntervalMs: 5000,
+              pollTimeoutMs: 1000 * 60 * 18,
+            },
+      };
+      if (isMotionControl && !sourceVideoDataUri) {
+        throw new Error('Kling motion-control route needs a source action video. Add a source video or set KLING_MODEL to an image-to-video model.');
+      }
+      const requestSummary = {
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        model,
+        baseURL: baseURL || 'default',
+        duration: isMotionControl ? 'source-video' : providerDuration(input, preparedSource),
+        resolution: videoResolution(input.preset?.aspectRatio ?? '9:16', input.preset?.resolution ?? '720p'),
+        aspectRatio: input.preset?.aspectRatio ?? '9:16',
+        hasReferenceVideo: Boolean(sourceVideoDataUri),
+        prompt: text,
+      };
+      requests.push(requestSummary);
+      const result = await generateVideo({
+        model: klingai.video(model),
+        prompt: { image: imageBytes, text },
+        duration: isMotionControl ? undefined : requestSummary.duration,
+        resolution: requestSummary.resolution,
+        aspectRatio: requestSummary.aspectRatio,
+        providerOptions,
+        maxRetries: 1,
+      });
+      const providerTaskId = aiSdkTaskId(result, 'klingai', `${batchRequestId}-${variant.slot}`);
+      const outputPath = path.join(outputDir, `variant-${variant.slot}-${safeSlug(variant.avatarName)}.mp4`);
+      await fsPromises.writeFile(outputPath, generatedVideoBytes(result));
+      variantResults.push({
+        slot: variant.slot,
+        avatarName: variant.avatarName,
+        requestId: providerTaskId,
+        outputPath,
+        status: 'complete',
+      });
+    }
+  } catch (error) {
+    return blockedProviderResult(input, options, `Direct Kling render failed: ${truncate(error?.message || String(error), 900)}`, {
+      model,
+      baseURL: baseURL || 'default',
+      requests,
+    });
+  }
+
+  const providerPayloadPath = await writeProviderPayload(userDataPath, input.providerId, batchRequestId, {
+    createdAt,
+    providerId: input.providerId,
+    providerName: 'Direct Kling 3.0',
+    model,
+    baseURL: baseURL || 'default',
+    requestId: batchRequestId,
+    requests,
+    variants: variantResults,
+    outputDir,
+    preparedSourceRunId: preparedSource?.runId,
+    campaign: campaignContext(input),
+    finishingPlan: buildFinishPlan(input, batchRequestId, variants),
+  });
+  const firstVariant = variantResults[0];
+  return {
+    ok: true,
+    providerId: input.providerId,
+    providerName: 'Direct Kling 3.0',
+    model,
+    status: 'complete',
+    requestId: batchRequestId,
+    outputPath: firstVariant?.outputPath,
+    providerPayloadPath,
+    variants: variantResults,
+    logs: ['Direct Kling render completed.'],
+    createdAt,
+  };
 }
 
 async function renderWithProvider(input, options = {}) {
@@ -2163,7 +2450,8 @@ async function renderWithProvider(input, options = {}) {
   if (FAL_PROVIDERS[input.providerId]) return renderWithFalProvider(input, options);
   if (input.providerId === 'heygen-cloud') return renderWithHeygenCli(input, options);
   if (input.providerId === 'openai-image-2') return renderWithOpenAiImage(input, options);
-  if (['direct-kling-3', 'direct-seedance-2'].includes(input.providerId)) return renderWithDirectPacketOnly(input, options);
+  if (input.providerId === 'direct-seedance-2') return renderWithDirectSeedance(input, options);
+  if (input.providerId === 'direct-kling-3') return renderWithDirectKling(input, options);
   if (input.providerId === 'mock-local') {
     return blockedProviderResult(input, options, 'Mock local provider writes packets only and does not call a video model.');
   }

@@ -22,7 +22,7 @@ This project is a clean-room workflow clone of public-facing face-swap creator t
 - Live fal/PixVerse route when `FAL_KEY` is present.
 - HeyGen Video Agent route through the authenticated local `heygen` CLI.
 - OpenAI GPT Image 2 high-quality still route when `OPENAI_API_KEY` is present.
-- Direct Seedance and direct Kling packet routes that block clearly until direct vendor credentials and endpoint config are installed.
+- Direct Seedance and direct Kling SDK routes that block clearly until direct vendor credentials are installed.
 - Job history, audit trail, preview area, and downloadable job manifest.
 - FFmpeg finish-plan generation for hard-cut MP4 exports under the Adventure marketing tree.
 
