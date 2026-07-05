@@ -117,7 +117,7 @@ const campaignIcons: Record<CampaignAppId, string> = {
 
 function App() {
   const [activeNav, setActiveNav] = useState('Projects')
-  const [providerId, setProviderId] = useState<ProviderId>('direct-seedance-2')
+  const [providerId, setProviderId] = useState<ProviderId>('fal-seedance-reference')
   const [preset, setPreset] = useState<RenderPreset>(defaultPreset)
   const [compliance] = useState<ComplianceState>(defaultCompliance)
   const [jobs, setJobs] = useState<RenderJob[]>(starterJobs)
@@ -1060,10 +1060,12 @@ function ProviderChips({
                 ? 'Ready'
                 : provider.id === 'openai-image-2'
                   ? 'Still images'
-                  : provider.id === 'direct-kling-3'
+                : provider.id === 'direct-kling-3'
+                  ? 'Direct API'
+                  : provider.id === 'direct-seedance-2'
                     ? 'Direct API'
-                    : provider.id === 'direct-seedance-2'
-                      ? 'Direct API'
+                    : provider.id === 'fal-seedance-reference'
+                      ? 'Ready'
                       : provider.id === 'heygen-cloud'
                         ? 'Talking head'
                         : 'Fast swap'

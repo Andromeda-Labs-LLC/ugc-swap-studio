@@ -3,10 +3,11 @@
 CopyTok uses a direct-first provider strategy:
 
 1. Prefer the cheapest direct provider API when the vendor account exposes a clear upload, submit, poll, and download contract.
-2. Use fal/PixVerse as the immediately usable fallback for one-click swap testing because the local Mac already has a working `FAL_KEY`.
-3. Use HeyGen through the authenticated HeyGen CLI for talking-head and presenter clips.
-4. Use OpenAI GPT Image 2 only for still assets, first-frame keyframes, carousel images, and avatar source images.
-5. Keep FFmpeg as the invisible finishing engine after provider generation.
+2. Use fal Seedance as the immediately usable Seedance lane because the local Mac already has a working `FAL_KEY` and the logged-in BytePlus/ModelArk account is currently blocked by country/region.
+3. Use fal/PixVerse as the fast one-click swap testing fallback.
+4. Use HeyGen through the authenticated HeyGen CLI for talking-head and presenter clips.
+5. Use OpenAI GPT Image 2 only for still assets, first-frame keyframes, carousel images, and avatar source images.
+6. Keep FFmpeg as the invisible finishing engine after provider generation.
 
 Renderer UI code never calls provider APIs directly. Secrets live in the macOS Keychain, shell environment, vendor CLI auth, or future backend secret stores.
 
@@ -14,7 +15,8 @@ Renderer UI code never calls provider APIs directly. Secrets live in the macOS K
 
 | UI chip | Backend route | Current status | Use |
 | --- | --- | --- | --- |
-| Seedance | `direct-seedance-2` | Live SDK route when a BytePlus ModelArk key is installed | High-quality multimodal video when direct pricing beats middlemen |
+| Seedance | `fal-seedance-reference` | Live through fal with the installed `FAL_KEY` | Operational Seedance reference-to-video route while direct BytePlus access is region-blocked |
+| Seedance Direct | `direct-seedance-2` | Live SDK route when a BytePlus ModelArk key is installed | High-quality multimodal video when direct pricing beats middlemen |
 | Kling | `direct-kling-3` | Live SDK route when Kling access and secret keys are installed | Direct Kling motion-control or image-to-video jobs using first-frame avatar stills |
 | PixVerse | `fal-pixverse-swap` | Live through fal | Fast source-video/person-swap testing |
 | HeyGen | `heygen-cloud` | Live through authenticated HeyGen CLI when CLI auth is valid | Talking-head UGC and presenter videos |
@@ -45,7 +47,7 @@ HeyGen is currently authenticated through the local `heygen` CLI, so no raw HeyG
 
 Kling direct defaults to `kling-v3.0-motion-control` so a source action video can drive the avatar performance. If no source video is supplied, the backend can be pointed at an image-to-video model with `KLING_MODEL`.
 
-Seedance direct defaults to BytePlus ModelArk at `https://ark.ap-southeast.bytepluses.com/api/v3` using `dreamina-seedance-2-0-260128`. `ARK_API_KEY` is preferred; `SEEDANCE_API_KEY` and `BYTEPLUS_API_KEY` are accepted aliases.
+Seedance direct defaults to BytePlus ModelArk at `https://ark.ap-southeast.bytepluses.com/api/v3` using `dreamina-seedance-2-0-260128`. `ARK_API_KEY` is preferred; `SEEDANCE_API_KEY` and `BYTEPLUS_API_KEY` are accepted aliases. As of the July 2026 setup attempt, the logged-in US BytePlus account shows: "We apologize, but this product is currently not available in your country/region." Keep `fal-seedance-reference` as the active lane until BytePlus enables ModelArk for the account or Commander authorizes a non-US eligible business/account path.
 
 ## Batch Variants
 

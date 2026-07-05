@@ -198,6 +198,7 @@ export const providerOptions: ProviderOption[] = [
 
 export const generationProviderOptions = providerOptions.filter((provider) =>
   [
+    'fal-seedance-reference',
     'direct-seedance-2',
     'direct-kling-3',
     'fal-pixverse-swap',
