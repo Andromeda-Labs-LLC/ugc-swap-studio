@@ -48,6 +48,10 @@
   font-weight: 800;
 }
 
+.brand strong {
+  color: #D7AE56;
+}
+
 .brand img {
   width: 44px;
   height: 44px;
@@ -135,6 +139,10 @@ h1 {
   font-weight: 860;
 }
 
+.hero-flow > h1 {
+  color: #D7AE56;
+}
+
 .hero-copy {
   max-width: 590px;
   margin: 16px auto 0;
@@ -188,7 +196,7 @@ h1 {
 }
 
 .left-rail .format-picker {
-  background: #E0CD92;
+  background: #D7AE56;
 }
 
 .left-rail .batch-caption-controls {
@@ -203,7 +211,7 @@ h1 {
 }
 
 .right-rail .output-controls {
-  background: #E0CD92;
+  background: #D7AE56;
 }
 
 .right-rail .avatar-library-controls {
