@@ -15,12 +15,13 @@ Renderer UI code never calls provider APIs directly. Secrets live in the macOS K
 
 | UI chip | Backend route | Current status | Use |
 | --- | --- | --- | --- |
-| Seedance | `fal-seedance-reference` | Live through fal with the installed `FAL_KEY` | Operational Seedance reference-to-video route while direct BytePlus access is region-blocked |
-| Seedance Direct | `direct-seedance-2` | Live SDK route when a BytePlus ModelArk key is installed | High-quality multimodal video when direct pricing beats middlemen |
-| Kling | `direct-kling-3` | Live SDK route when Kling access and secret keys are installed | Direct Kling motion-control or image-to-video jobs using first-frame avatar stills |
-| PixVerse | `fal-pixverse-swap` | Live through fal | Fast source-video/person-swap testing |
+| Seedance via fal | `fal-seedance-reference` | Live through fal with the installed `FAL_KEY` | Operational Seedance reference-to-video route while direct BytePlus access is region-blocked |
+| Kling Direct | `direct-kling-3` | Live SDK route when Kling access and secret keys are installed | Direct Kling motion-control or image-to-video jobs using first-frame avatar stills |
+| PixVerse via fal | `fal-pixverse-swap` | Live through fal | Fast source-video/person-swap testing |
 | HeyGen | `heygen-cloud` | Live through authenticated HeyGen CLI when CLI auth is valid | Talking-head UGC and presenter videos |
-| Image | `openai-image-2` | Live only when `OPENAI_API_KEY` exists; otherwise use ChatGPT Pro manually | High-quality still images and first-frame assets |
+| OpenAI Image | `openai-image-2` | Live only when `OPENAI_API_KEY` exists; otherwise use ChatGPT Pro manually | High-quality still images and first-frame assets |
+
+`direct-seedance-2` remains in the backend as an advanced route, but it is hidden from the main provider menu while the Andromeda Labs BytePlus/ModelArk account is region-blocked.
 
 ## Keychain Accounts
 
@@ -31,6 +32,7 @@ FAL_KEY
 APIFY_TOKEN
 KLING_ACCESS_KEY
 KLING_SECRET_KEY
+KLING_API_KEY
 KLING_MODEL
 KLING_BASE_URL
 ARK_API_KEY
@@ -45,7 +47,7 @@ HeyGen is currently authenticated through the local `heygen` CLI, so no raw HeyG
 
 ## Direct Provider Defaults
 
-Kling direct defaults to `kling-v3.0-motion-control` so a source action video can drive the avatar performance. If no source video is supplied, the backend can be pointed at an image-to-video model with `KLING_MODEL`.
+Kling direct defaults to `kling-v3.0-motion-control` so a source action video can drive the avatar performance. The official Kling SDK expects an access-key plus secret-key pair. Store them as `KLING_ACCESS_KEY` and `KLING_SECRET_KEY`; `KLING_API_KEY` is accepted only when it contains the pair as `ACCESS_KEY:SECRET_KEY` or JSON with both values. If no source video is supplied, the backend can be pointed at an image-to-video model with `KLING_MODEL`.
 
 Seedance direct defaults to BytePlus ModelArk at `https://ark.ap-southeast.bytepluses.com/api/v3` using `dreamina-seedance-2-0-260128`. `ARK_API_KEY` is preferred; `SEEDANCE_API_KEY` and `BYTEPLUS_API_KEY` are accepted aliases. As of the July 2026 setup attempt, the logged-in US BytePlus account shows: "We apologize, but this product is currently not available in your country/region." Keep `fal-seedance-reference` as the active lane until BytePlus enables ModelArk for the account or Commander authorizes a non-US eligible business/account path.
 

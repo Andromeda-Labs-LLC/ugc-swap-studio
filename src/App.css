@@ -500,7 +500,7 @@ h1 {
 
 .provider-chips button {
   min-width: 0;
-  min-height: 52px;
+  min-height: 54px;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -522,7 +522,6 @@ h1 {
 .provider-chips button strong,
 .provider-chips button small {
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
@@ -530,11 +529,13 @@ h1 {
   color: var(--ink);
   font-size: 12px;
   font-weight: 830;
+  line-height: 1.15;
 }
 
 .provider-chips button small {
   color: #7b858f;
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .provider-chips button.selected {

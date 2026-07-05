@@ -1049,32 +1049,39 @@ function ProviderChips({
           const Icon = provider.icon
           const capability = capabilities?.providers.find((item) => item.id === provider.id)
           const missingSecret = capability?.status === 'missing-secret'
+          const needsConfig = capability?.status === 'needs-config'
           const statusLabel =
-            missingSecret
-              ? `Needs ${capability?.secretEnv || 'key'}`
-              : capability?.status === 'needs-config'
-                ? 'Needs config'
-                : capability?.status === 'cli-ready'
-                  ? 'CLI ready'
-              : capability?.status === 'adapter-ready'
-                ? 'Ready'
-                : provider.id === 'openai-image-2'
-                  ? 'Still images'
-                : provider.id === 'direct-kling-3'
-                  ? 'Direct API'
-                  : provider.id === 'direct-seedance-2'
-                    ? 'Direct API'
-                    : provider.id === 'fal-seedance-reference'
-                      ? 'Ready'
-                      : provider.id === 'heygen-cloud'
-                        ? 'Talking head'
-                        : 'Fast swap'
+            missingSecret || needsConfig
+              ? provider.id === 'direct-kling-3'
+                ? 'Needs AK/SK'
+                : provider.id === 'fal-seedance-reference' || provider.id === 'fal-pixverse-swap'
+                  ? 'Needs fal key'
+                  : provider.id === 'openai-image-2'
+                    ? 'Needs OpenAI'
+                    : 'Needs config'
+              : capability?.status === 'cli-ready'
+                ? 'CLI ready'
+                : capability?.status === 'adapter-ready'
+                  ? 'Ready'
+                  : provider.id === 'openai-image-2'
+                    ? 'Still images'
+                    : provider.id === 'direct-kling-3'
+                      ? 'Direct API'
+                      : provider.id === 'fal-seedance-reference'
+                        ? 'Ready'
+                        : provider.id === 'heygen-cloud'
+                          ? 'Talking head'
+                          : 'Fast swap'
+          const attentionTitle =
+            provider.id === 'direct-kling-3' && (missingSecret || needsConfig)
+              ? 'Official Kling direct needs an access-key plus secret-key pair. Store KLING_ACCESS_KEY and KLING_SECRET_KEY, or KLING_API_KEY as ACCESS_KEY:SECRET_KEY.'
+              : `${capability?.secretEnv || 'Provider key'} is missing from the CopyTok Keychain.`
           return (
             <button
               key={provider.id}
               className={providerId === provider.id ? 'selected' : ''}
               type="button"
-              title={missingSecret ? `${capability?.secretEnv || 'Provider key'} is missing from the CopyTok Keychain.` : provider.bestFor}
+              title={missingSecret || needsConfig ? attentionTitle : provider.bestFor}
               onClick={() => onChange(provider.id)}
             >
               <Icon size={15} />

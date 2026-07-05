@@ -148,10 +148,50 @@ function hasSecret(account) {
   return Boolean(resolveSecret(account));
 }
 
+function parseCombinedKlingApiKey(value) {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) {
+    return { accessKey: '', secretKey: '', format: 'missing' };
+  }
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const accessKey = String(parsed.accessKey || parsed.access_key || parsed.ak || '').trim();
+      const secretKey = String(parsed.secretKey || parsed.secret_key || parsed.sk || '').trim();
+      if (accessKey && secretKey) {
+        return { accessKey, secretKey, format: 'json-pair' };
+      }
+    } catch {
+      return { accessKey: '', secretKey: '', format: 'single-key' };
+    }
+  }
+
+  const colonIndex = trimmed.indexOf(':');
+  if (colonIndex > 0) {
+    const accessKey = trimmed.slice(0, colonIndex).trim();
+    const secretKey = trimmed.slice(colonIndex + 1).trim();
+    if (accessKey && secretKey) {
+      return { accessKey, secretKey, format: 'colon-pair' };
+    }
+  }
+
+  return { accessKey: '', secretKey: '', format: 'single-key' };
+}
+
 function resolveKlingCredentials() {
-  const accessKey = firstSecret([PROVIDER_SECRETS.klingAccessKey, PROVIDER_SECRETS.klingAiAccessKey]);
-  const secretKey = firstSecret([PROVIDER_SECRETS.klingSecretKey, PROVIDER_SECRETS.klingAiSecretKey]);
-  return { accessKey, secretKey };
+  const explicitAccessKey = firstSecret([PROVIDER_SECRETS.klingAccessKey, PROVIDER_SECRETS.klingAiAccessKey]);
+  const explicitSecretKey = firstSecret([PROVIDER_SECRETS.klingSecretKey, PROVIDER_SECRETS.klingAiSecretKey]);
+  if (explicitAccessKey && explicitSecretKey) {
+    return { accessKey: explicitAccessKey, secretKey: explicitSecretKey, source: 'split-pair' };
+  }
+
+  const combined = parseCombinedKlingApiKey(resolveSecret(PROVIDER_SECRETS.klingApiKey));
+  return {
+    accessKey: combined.accessKey,
+    secretKey: combined.secretKey,
+    source: combined.format,
+  };
 }
 
 function resolveSeedanceApiKey() {
@@ -183,7 +223,8 @@ function heygenCliStatus() {
 }
 
 function directKlingStatus() {
-  const { accessKey, secretKey } = resolveKlingCredentials();
+  const { accessKey, secretKey, source } = resolveKlingCredentials();
+  if (source === 'single-key') return 'needs-config';
   if (!accessKey || !secretKey) return 'missing-secret';
   return 'adapter-ready';
 }
@@ -201,8 +242,11 @@ function nextRequiredSecretForProvider(providerId) {
     return 'FAL_KEY in the CopyTok macOS Keychain entry or secure environment';
   }
   if (providerId === 'direct-kling-3') {
-    const { accessKey, secretKey } = resolveKlingCredentials();
+    const { accessKey, secretKey, source } = resolveKlingCredentials();
     if (!accessKey || !secretKey) {
+      if (source === 'single-key') {
+        return 'Kling direct needs KLING_ACCESS_KEY + KLING_SECRET_KEY, or KLING_API_KEY stored as ACCESS_KEY:SECRET_KEY';
+      }
       return 'KLING_ACCESS_KEY and KLING_SECRET_KEY in the CopyTok macOS Keychain entry';
     }
   }
@@ -358,7 +402,7 @@ function getEngineCapabilities(appRoot) {
         id: 'direct-kling-3',
         label: 'Direct Kling 3.0',
         status: directKlingStatus(),
-        secretEnv: 'KLING_ACCESS_KEY + KLING_SECRET_KEY',
+        secretEnv: 'KLING AK/SK',
         role: 'Cost-first direct Kling route for image-to-video jobs using first-frame avatar stills.',
       },
       {
@@ -1632,7 +1676,7 @@ function buildProviderPackets(input, packetId = 'packet') {
     directKling3: {
       provider: 'kling-open-platform',
       model: resolveSecret(PROVIDER_SECRETS.klingModel) || DEFAULT_KLING_MODEL,
-      secretEnv: 'KLING_ACCESS_KEY and KLING_SECRET_KEY',
+      secretEnv: 'KLING_ACCESS_KEY and KLING_SECRET_KEY, or KLING_API_KEY as ACCESS_KEY:SECRET_KEY',
       requiredConfig: ['Optional KLING_MODEL or KLING_BASE_URL override only when needed'],
       mode: 'motion_control_or_image_to_video',
       requestTemplate: {
@@ -2312,9 +2356,20 @@ async function renderWithDirectSeedance(input, options = {}) {
 }
 
 async function renderWithDirectKling(input, options = {}) {
-  const { accessKey, secretKey } = resolveKlingCredentials();
+  const { accessKey, secretKey, source } = resolveKlingCredentials();
   if (!accessKey || !secretKey) {
-    return blockedProviderResult(input, options, 'KLING_ACCESS_KEY and KLING_SECRET_KEY are missing. Create direct Kling API credentials, then store both in the CopyTok Keychain.');
+    if (source === 'single-key') {
+      return blockedProviderResult(
+        input,
+        options,
+        'A KLING_API_KEY is present, but the official direct Kling route needs an access-key plus secret-key pair. Store KLING_ACCESS_KEY and KLING_SECRET_KEY, or store KLING_API_KEY as ACCESS_KEY:SECRET_KEY.',
+      );
+    }
+    return blockedProviderResult(
+      input,
+      options,
+      'KLING_ACCESS_KEY and KLING_SECRET_KEY are missing. Create direct Kling API credentials, then store both in the CopyTok Keychain.',
+    );
   }
   const createdAt = new Date().toISOString();
   const userDataPath = resolveRuntimeDir(options);

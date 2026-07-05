@@ -116,7 +116,7 @@ export const providerOptions: ProviderOption[] = [
   {
     id: 'direct-seedance-2',
     name: 'Direct Seedance 2.0',
-    shortName: 'Seedance',
+    shortName: 'Seedance Direct',
     mode: 'Cloud',
     icon: Sparkles,
     bestFor: 'Cost-first direct Seedance route when BytePlus/ModelArk credentials are configured.',
@@ -125,7 +125,7 @@ export const providerOptions: ProviderOption[] = [
   {
     id: 'direct-kling-3',
     name: 'Direct Kling 3.0',
-    shortName: 'Kling',
+    shortName: 'Kling Direct',
     mode: 'Cloud',
     icon: Flame,
     bestFor: 'Cheaper direct image-to-video route for first-frame avatar motion and short reaction hooks.',
@@ -134,7 +134,7 @@ export const providerOptions: ProviderOption[] = [
   {
     id: 'openai-image-2',
     name: 'OpenAI GPT Image 2',
-    shortName: 'Image',
+    shortName: 'OpenAI Image',
     mode: 'Cloud',
     icon: ImagePlus,
     bestFor: 'Highest-quality still images, first-frame keyframes, ad images, and carousel slides.',
@@ -143,7 +143,7 @@ export const providerOptions: ProviderOption[] = [
   {
     id: 'fal-seedance-reference',
     name: 'fal Seedance 2.0 Reference',
-    shortName: 'Seedance',
+    shortName: 'Seedance via fal',
     mode: 'Cloud',
     icon: Sparkles,
     bestFor: 'Highest-quality reference-to-video generation using avatar image, source video, and optional audio reference.',
@@ -152,7 +152,7 @@ export const providerOptions: ProviderOption[] = [
   {
     id: 'fal-pixverse-swap',
     name: 'fal PixVerse Swap',
-    shortName: 'PixVerse',
+    shortName: 'PixVerse via fal',
     mode: 'Cloud',
     icon: Clapperboard,
     bestFor: 'Closest one-click face/body swap route for preserving original source movement and audio.',
@@ -196,16 +196,17 @@ export const providerOptions: ProviderOption[] = [
   },
 ]
 
-export const generationProviderOptions = providerOptions.filter((provider) =>
-  [
-    'fal-seedance-reference',
-    'direct-seedance-2',
-    'direct-kling-3',
-    'fal-pixverse-swap',
-    'heygen-cloud',
-    'openai-image-2',
-  ].includes(provider.id),
-)
+const generationProviderIds: ProviderId[] = [
+  'fal-seedance-reference',
+  'direct-kling-3',
+  'fal-pixverse-swap',
+  'heygen-cloud',
+  'openai-image-2',
+]
+
+export const generationProviderOptions = generationProviderIds
+  .map((providerId) => providerOptions.find((provider) => provider.id === providerId))
+  .filter((provider): provider is ProviderOption => Boolean(provider))
 
 export const starterJobs: RenderJob[] = [
   {
