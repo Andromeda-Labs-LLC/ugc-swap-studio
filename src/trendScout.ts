@@ -138,7 +138,7 @@ export const trendAppProfiles: TrendAppProfile[] = [
     name: 'SnapGLP',
     shortName: 'GLP',
     category: 'GLP-1 food logging',
-    accent: '#0ba8a2',
+    accent: '#5C7282',
     description: 'Food, protein, dose-day trust, grocery scanning, restaurant choices, and weight-loss app UGC.',
     defaultQuery: 'GLP-1 meal tracking app protein food scanner weight loss TikTok',
     seedQueries: [
@@ -165,7 +165,7 @@ export const trendAppProfiles: TrendAppProfile[] = [
     name: 'ToneClone',
     shortName: 'Tone',
     category: 'Guitar tone matching',
-    accent: '#8a5cff',
+    accent: '#D7AE56',
     description: 'Guitarists, amp tone, pedals, bedroom recording, plugin comparison, and riff reaction UGC.',
     defaultQuery: 'guitar tone app amp simulator pedalboard home recording TikTok',
     seedQueries: [

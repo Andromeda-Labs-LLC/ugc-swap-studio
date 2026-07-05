@@ -43,7 +43,6 @@ import {
   createMockRenderJob,
   downloadManifest,
   generationProviderOptions,
-  providerOptions,
   starterJobs,
   type ComplianceState,
   type ProviderId,
@@ -115,8 +114,27 @@ const campaignIcons: Record<CampaignAppId, string> = {
   toneclone: tonecloneIcon,
 }
 
+type AppearanceMode = 'light' | 'dark' | 'system'
+
+const appearanceModes: Array<{ id: AppearanceMode; label: string }> = [
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+  { id: 'system', label: 'System' },
+]
+
+function storedAppearanceMode(): AppearanceMode {
+  try {
+    const stored = window.localStorage.getItem('copytok-appearance')
+    return stored === 'dark' || stored === 'system' ? stored : 'light'
+  } catch {
+    return 'light'
+  }
+}
+
 function App() {
   const [activeNav, setActiveNav] = useState('Projects')
+  const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(storedAppearanceMode)
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false)
   const [providerId, setProviderId] = useState<ProviderId>('fal-seedance-reference')
   const [preset, setPreset] = useState<RenderPreset>(defaultPreset)
   const [compliance] = useState<ComplianceState>(defaultCompliance)
@@ -143,7 +161,6 @@ function App() {
   const [sourceUrl, setSourceUrl] = useState('')
   const [sourceAnalysis, setSourceAnalysis] = useState<SourceLinkAnalysis | null>(null)
   const [preparedSource, setPreparedSource] = useState<PreparedSource | null>(null)
-  const [renderPacket, setRenderPacket] = useState<RenderPacket | null>(null)
   const [engineCapabilities, setEngineCapabilities] = useState<EngineCapabilities | null>(null)
   const [isAnalyzingSource, setIsAnalyzingSource] = useState(false)
   const [isPreparingSource, setIsPreparingSource] = useState(false)
@@ -166,6 +183,23 @@ function App() {
   const [trendError, setTrendError] = useState('')
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem('copytok-appearance', appearanceMode)
+    } catch {
+      // Non-critical preference persistence.
+    }
+  }, [appearanceMode])
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!media) return
+    const sync = () => setSystemPrefersDark(media.matches)
+    sync()
+    media.addEventListener?.('change', sync)
+    return () => media.removeEventListener?.('change', sync)
+  }, [])
+
+  useEffect(() => {
     window.studioHost?.getHostInfo().then(setHostInfo).catch(() => setHostInfo(null))
     window.studioHost?.getEngineCapabilities().then(setEngineCapabilities).catch(() => setEngineCapabilities(null))
     window.studioHost?.getTrendScoutStatus?.().then(setTrendStatus).catch(() => setTrendStatus(null))
@@ -179,10 +213,6 @@ function App() {
     return () => window.clearInterval(interval)
   }, [])
 
-  const selectedProvider = useMemo(
-    () => providerOptions.find((provider) => provider.id === providerId) ?? providerOptions[0],
-    [providerId],
-  )
   const selectedCampaign = useMemo(() => getCampaignRecipe(campaignId), [campaignId])
   const selectedFormat = useMemo(() => getFormatCategory(formatCategoryId), [formatCategoryId])
   const selectedTrendPreset = useMemo(
@@ -346,7 +376,6 @@ function App() {
     })
     setSourceAnalysis(null)
     setPreparedSource(null)
-    setRenderPacket(null)
     setProviderResult(null)
     setRenderError('')
     setActiveNav('Projects')
@@ -388,7 +417,6 @@ function App() {
     setSourceUrl('')
     setSourceAnalysis(null)
     setPreparedSource(null)
-    setRenderPacket(null)
     setRenderError('')
     setProviderResult(null)
     setSourcePreview((existingPreview) => {
@@ -407,7 +435,6 @@ function App() {
     setSourceVideoPath('')
     setSourceAnalysis(null)
     setPreparedSource(null)
-    setRenderPacket(null)
     setProviderResult(null)
     setRenderError('')
     if (value) setSourceVideo('')
@@ -421,7 +448,6 @@ function App() {
       const analysis = await window.studioHost.analyzeSourceUrl(sourceUrl.trim())
       setSourceAnalysis(analysis)
       setPreparedSource(null)
-      setRenderPacket(null)
     } catch (error) {
       setSourceAnalysis({
         ok: false,
@@ -511,26 +537,24 @@ function App() {
         throw new Error('Prepare the source footage before sending it to the selected provider.')
       }
 
-      const packet =
-        window.studioHost?.createRenderPacket
-          ? await window.studioHost.createRenderPacket({
-              providerId,
-              campaign: selectedCampaign,
-              formatCategory: selectedFormat,
-              trendPreset: selectedTrendPreset,
-              avatars: avatarSelections.slice(0, preset.generationCount),
-              avatarSlots: selectedAvatarSlots,
-              referenceFace,
-              referenceFacePath,
-              sourceVideo: sourceLabel,
-              sourceVideoPath,
-              sourceReference: sourceReferenceSummary(prepared),
-              preparedSource: prepared,
-              preset,
-              compliance,
-            })
-          : null
-      if (packet) setRenderPacket(packet)
+      const packet = window.studioHost?.createRenderPacket
+        ? await window.studioHost.createRenderPacket({
+            providerId,
+            campaign: selectedCampaign,
+            formatCategory: selectedFormat,
+            trendPreset: selectedTrendPreset,
+            avatars: avatarSelections.slice(0, preset.generationCount),
+            avatarSlots: selectedAvatarSlots,
+            referenceFace,
+            referenceFacePath,
+            sourceVideo: sourceLabel,
+            sourceVideoPath,
+            sourceReference: sourceReferenceSummary(prepared),
+            preparedSource: prepared,
+            preset,
+            compliance,
+          })
+        : null
 
       const jobInput: Parameters<typeof createMockRenderJob>[0] = {
         providerId,
@@ -586,8 +610,10 @@ function App() {
     }
   }
 
+  const resolvedAppearance = appearanceMode === 'system' ? (systemPrefersDark ? 'dark' : 'light') : appearanceMode
+
   return (
-    <main className="studio-shell">
+    <main className="studio-shell" data-theme={resolvedAppearance}>
       <header className="app-header">
         <div className="brand">
           <img src={appIcon} alt="" />
@@ -646,6 +672,8 @@ function App() {
             onCreateBrief={createTrendBrief}
             onSendToComposer={sendTrendToComposer}
           />
+        ) : activeNav === 'Settings' ? (
+          <SettingsPanel appearanceMode={appearanceMode} onAppearanceChange={setAppearanceMode} />
         ) : (
           <>
             <h1>CopyTok</h1>
@@ -655,155 +683,141 @@ function App() {
               onCampaignChange={handleCampaignChange}
             />
 
-            <FormatPicker
-              selectedFormat={selectedFormat}
-              selectedTrendPreset={selectedTrendPreset}
-              formatCategoryId={formatCategoryId}
-              trendPresetId={trendPresetId}
-              onFormatChange={handleFormatChange}
-              onTrendPresetChange={setTrendPresetId}
-            />
+            <section className="workshop-card" aria-label="CopyTok generator">
+              <div className="workshop-layout">
+                <aside className="workshop-rail left-rail" aria-label="Format settings">
+                  <FormatPicker
+                    selectedFormat={selectedFormat}
+                    selectedTrendPreset={selectedTrendPreset}
+                    formatCategoryId={formatCategoryId}
+                    trendPresetId={trendPresetId}
+                    onFormatChange={handleFormatChange}
+                    onTrendPresetChange={setTrendPresetId}
+                  />
+                  <BatchCaptionControls
+                    preset={preset}
+                    onGenerationCountChange={handleGenerationCount}
+                    onPresetChange={setPreset}
+                  />
+                </aside>
 
-            <section className="swap-cards" aria-label="Swap inputs">
-              <UploadCard
-                accent="teal"
-                title="Avatar photo"
-                subtitle="Upload the first-frame avatar image that anchors the render"
-                dropLabel="Drop first-frame image here"
-                dropMeta="PNG, JPG up to 20MB"
-                accept="image/*"
-                icon={<Image size={24} />}
-                fileName={referenceFace}
-                preview={referencePreview}
-                onFile={handleReferenceUpload}
-                footer={
-                  <button className="ghost-button" type="button" onClick={openAvatarGenerator}>
-                    <WandSparkles size={15} />
-                    Generate AI avatar
+                <section className="workshop-stage" aria-label="Main video generator">
+                  <section className="swap-cards" aria-label="Swap inputs">
+                    <UploadCard
+                      accent="teal"
+                      title="Avatar photo"
+                      subtitle=""
+                      dropLabel="Drop avatar image"
+                      dropMeta="PNG, JPG"
+                      accept="image/*"
+                      icon={<Image size={24} />}
+                      fileName={referenceFace}
+                      preview={referencePreview}
+                      onFile={handleReferenceUpload}
+                      footer={
+                        <button className="ghost-button" type="button" onClick={openAvatarGenerator}>
+                          <WandSparkles size={15} />
+                          Generate AI avatar
+                        </button>
+                      }
+                    />
+
+                    <div className="swap-arrow" aria-hidden="true">
+                      ⇄
+                    </div>
+
+                    <UploadCard
+                      accent="violet"
+                      title="Source video"
+                      subtitle=""
+                      dropLabel="Drop source video"
+                      dropMeta="MP4, MOV"
+                      accept="video/mp4,video/quicktime,video/*"
+                      icon={<Play size={24} />}
+                      fileName={sourceVideo}
+                      preview={sourcePreview}
+                      onFile={handleSourceUpload}
+                      footer={
+                        <div className="link-input">
+                          <span>OR PASTE LINK</span>
+                          <label>
+                            <Link size={15} />
+                            <input
+                              value={sourceUrl}
+                              onChange={(event) => handleSourceUrlChange(event.target.value)}
+                              placeholder="TikTok, Instagram, YouTube Short, or source URL"
+                            />
+                          </label>
+                          <button
+                            className="analyze-button"
+                            type="button"
+                            disabled={!sourceUrl.trim() || isAnalyzingSource}
+                            onClick={analyzeSourceLink}
+                          >
+                            <RefreshCw size={14} className={isAnalyzingSource ? 'spinning' : ''} />
+                            {isAnalyzingSource ? 'Fetching post' : 'Analyze link'}
+                          </button>
+                        </div>
+                      }
+                    />
+                  </section>
+
+                  <button
+                    className="generate-button"
+                    type="button"
+                    disabled={!readyToRender || isPreparingSource || isCreatingPacket || isRenderingProvider}
+                    onClick={startRenderJob}
+                  >
+                    <Sparkles size={18} />
+                    {isRenderingProvider
+                      ? 'Rendering'
+                      : isPreparingSource || isCreatingPacket
+                        ? 'Preparing'
+                        : preset.generationCount > 1
+                          ? `Generate ${preset.generationCount} Videos`
+                          : 'Generate Video'}
                   </button>
-                }
-              />
+                  {!readyToRender && (
+                    <p className="render-hint">
+                      <CircleAlert size={15} />
+                      Add avatar and source.
+                    </p>
+                  )}
+                  {renderError && (
+                    <p className="render-error">
+                      <CircleAlert size={15} />
+                      {renderError}
+                    </p>
+                  )}
 
-              <div className="swap-arrow" aria-hidden="true">
-                ⇄
+                  <SourceInsight
+                    analysis={sourceAnalysis}
+                    sourceUrl={sourceUrl}
+                    isAnalyzing={isAnalyzingSource}
+                    isPreparing={isPreparingSource}
+                    preparedSource={preparedSource}
+                    onPrepare={prepareSourceLink}
+                  />
+                </section>
+
+                <aside className="workshop-rail right-rail" aria-label="Provider and output settings">
+                  <ProviderChips
+                    providerId={providerId}
+                    capabilities={engineCapabilities}
+                    onChange={setProviderId}
+                  />
+                  <OutputControls preset={preset} onPresetChange={setPreset} />
+                  <AvatarLibraryControls
+                    preset={preset}
+                    avatarSelections={avatarSelections}
+                    avatarSlotFiles={avatarSlotFiles}
+                    campaignAvatars={campaignAvatars}
+                    onAvatarChange={handleAvatarSelection}
+                    onAvatarFile={handleAvatarSlotFile}
+                  />
+                </aside>
               </div>
-
-              <UploadCard
-                accent="violet"
-                title="Source video"
-                subtitle="Upload an acted-out template or analyze a permitted social link"
-                dropLabel="Drop video here"
-                dropMeta="MP4, MOV up to 500MB"
-                accept="video/mp4,video/quicktime,video/*"
-                icon={<Play size={24} />}
-                fileName={sourceVideo}
-                preview={sourcePreview}
-                onFile={handleSourceUpload}
-                footer={
-                  <div className="link-input">
-                    <span>OR PASTE LINK</span>
-                    <label>
-                      <Link size={15} />
-                      <input
-                        value={sourceUrl}
-                        onChange={(event) => handleSourceUrlChange(event.target.value)}
-                        placeholder="TikTok, Instagram, YouTube Short, or source URL"
-                      />
-                    </label>
-                    <button
-                      className="analyze-button"
-                      type="button"
-                      disabled={!sourceUrl.trim() || isAnalyzingSource}
-                      onClick={analyzeSourceLink}
-                    >
-                      <RefreshCw size={14} className={isAnalyzingSource ? 'spinning' : ''} />
-                      {isAnalyzingSource ? 'Fetching post' : 'Analyze link'}
-                    </button>
-                  </div>
-                }
-              />
             </section>
-
-            <SourceInsight
-              analysis={sourceAnalysis}
-              sourceUrl={sourceUrl}
-              isAnalyzing={isAnalyzingSource}
-              isPreparing={isPreparingSource}
-              preparedSource={preparedSource}
-              onPrepare={prepareSourceLink}
-            />
-
-            <GenerationPlanner
-              preset={preset}
-              avatarSelections={avatarSelections}
-              avatarSlotFiles={avatarSlotFiles}
-              campaignAvatars={campaignAvatars}
-              onGenerationCountChange={handleGenerationCount}
-              onAvatarChange={handleAvatarSelection}
-              onAvatarFile={handleAvatarSlotFile}
-              onPresetChange={setPreset}
-            />
-
-            <section className="control-panel" aria-label="Render controls">
-              <div className="provider-block">
-                <ProviderChips
-                  providerId={providerId}
-                  capabilities={engineCapabilities}
-                  onChange={setProviderId}
-                />
-                <small>{selectedProvider.bestFor}</small>
-              </div>
-
-              <div className="output-block">
-                <span>Output</span>
-                <label className="control-label">Aspect ratio</label>
-                <SegmentedControl
-                  options={['9:16', '1:1', '16:9']}
-                  value={preset.aspectRatio}
-                  onChange={(aspectRatio) =>
-                    setPreset((current) => ({ ...current, aspectRatio: aspectRatio as RenderPreset['aspectRatio'] }))
-                  }
-                />
-                <label className="control-label">Resolution</label>
-                <SegmentedControl
-                  options={['720p', '1080p']}
-                  value={preset.resolution}
-                  onChange={(resolution) =>
-                    setPreset((current) => ({ ...current, resolution: resolution as RenderPreset['resolution'] }))
-                  }
-                />
-              </div>
-
-              <button
-                className="generate-button"
-                type="button"
-                disabled={!readyToRender || isPreparingSource || isCreatingPacket || isRenderingProvider}
-                onClick={startRenderJob}
-              >
-                <Sparkles size={18} />
-                {isRenderingProvider
-                  ? 'Rendering'
-                  : isPreparingSource || isCreatingPacket
-                    ? 'Preparing Engine Packet'
-                    : preset.generationCount > 1
-                      ? `Generate ${preset.generationCount} Videos`
-                      : 'Generate Video'}
-              </button>
-              {!readyToRender && (
-                <p className="render-hint">
-                  <CircleAlert size={15} />
-                  Add an avatar and upload a video or analyze a link.
-                </p>
-              )}
-              {renderError && (
-                <p className="render-error">
-                  <CircleAlert size={15} />
-                  {renderError}
-                </p>
-              )}
-            </section>
-
-            <EngineStackPanel capabilities={engineCapabilities} renderPacket={renderPacket} />
 
             <QueuePanel
               job={activeJob}
@@ -847,6 +861,42 @@ function CampaignBoard({
   )
 }
 
+function SettingsPanel({
+  appearanceMode,
+  onAppearanceChange,
+}: {
+  appearanceMode: AppearanceMode
+  onAppearanceChange: (mode: AppearanceMode) => void
+}) {
+  return (
+    <section className="settings-panel" aria-label="Settings">
+      <div>
+        <h1>Settings</h1>
+      </div>
+      <div className="settings-row">
+        <div>
+          <strong>Appearance</strong>
+          <span>Choose how CopyTok looks on this Mac.</span>
+        </div>
+        <div className="appearance-switch" role="radiogroup" aria-label="Appearance">
+          {appearanceModes.map((mode) => (
+            <button
+              key={mode.id}
+              className={appearanceMode === mode.id ? 'selected' : ''}
+              type="button"
+              role="radio"
+              aria-checked={appearanceMode === mode.id}
+              onClick={() => onAppearanceChange(mode.id)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function FormatPicker({
   selectedFormat,
   selectedTrendPreset,
@@ -864,24 +914,17 @@ function FormatPicker({
 }) {
   return (
     <section className="format-picker" aria-label="Format and saved trend">
-      <div className="format-column">
+      <label className="compact-field">
         <span>Format category</span>
-        <div className="format-grid">
+        <select value={formatCategoryId} onChange={(event) => onFormatChange(event.target.value as FormatCategoryId)}>
           {formatCategories.map((format) => (
-            <button
-              key={format.id}
-              type="button"
-              className={formatCategoryId === format.id ? 'selected' : ''}
-              onClick={() => onFormatChange(format.id)}
-              title={format.bestFor}
-            >
-              <strong>{format.name}</strong>
-              <small>{format.summary}</small>
-            </button>
+            <option key={format.id} value={format.id}>
+              {format.name}
+            </option>
           ))}
-        </div>
-      </div>
-      <div className="trend-column">
+        </select>
+      </label>
+      <label className="compact-field">
         <span>Saved trend</span>
         <select value={trendPresetId} onChange={(event) => onTrendPresetChange(event.target.value)}>
           {selectedFormat.trendPresets.map((preset) => (
@@ -890,46 +933,103 @@ function FormatPicker({
             </option>
           ))}
         </select>
-        <div className="trend-preset-card">
-          <strong>{selectedTrendPreset.firstThreeSeconds}</strong>
-          <span>{selectedTrendPreset.visualBehavior}</span>
-          <small>{selectedTrendPreset.musicNote}</small>
-        </div>
+      </label>
+      <div className="trend-preset-card">
+        <strong>{selectedTrendPreset.firstThreeSeconds}</strong>
       </div>
     </section>
   )
 }
 
-function GenerationPlanner({
+function BatchCaptionControls({
   preset,
-  avatarSelections,
-  avatarSlotFiles,
-  campaignAvatars,
   onGenerationCountChange,
-  onAvatarChange,
-  onAvatarFile,
   onPresetChange,
 }: {
   preset: RenderPreset
-  avatarSelections: string[]
-  avatarSlotFiles: Array<{ name: string; path: string; preview: string | null }>
-  campaignAvatars: AvatarRecipe[]
   onGenerationCountChange: (count: 1 | 2 | 3) => void
-  onAvatarChange: (slot: number, avatarId: string) => void
-  onAvatarFile: (slot: number, files: FileList | null) => void
   onPresetChange: (updater: (current: RenderPreset) => RenderPreset) => void
 }) {
   return (
-    <section className="generation-planner" aria-label="Batch and caption planning">
+    <section className="rail-panel batch-caption-controls" aria-label="Batch and captions">
       <div className="planner-block">
-        <span>Batch</span>
+        <span>Videos</span>
         <SegmentedControl
           options={generationCountOptions.map(String)}
           value={String(preset.generationCount)}
           onChange={(value) => onGenerationCountChange(Number(value) as 1 | 2 | 3)}
         />
-        <small>Generate one, two, or three avatar variants from the same format.</small>
       </div>
+      <div className="planner-block">
+        <span>Captions</span>
+        <select
+          value={preset.captionStyle}
+          onChange={(event) =>
+            onPresetChange((current) => ({ ...current, captionStyle: event.target.value as RenderPreset['captionStyle'] }))
+          }
+        >
+          <option value="none">No burned captions</option>
+          {captionStyles.map((style) => (
+            <option key={style.id} value={style.id}>
+              {style.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </section>
+  )
+}
+
+function OutputControls({
+  preset,
+  onPresetChange,
+}: {
+  preset: RenderPreset
+  onPresetChange: (updater: (current: RenderPreset) => RenderPreset) => void
+}) {
+  return (
+    <section className="rail-panel output-controls" aria-label="Output settings">
+      <div className="planner-block">
+        <span>Aspect</span>
+        <SegmentedControl
+          options={['9:16', '1:1', '16:9']}
+          value={preset.aspectRatio}
+          onChange={(value) =>
+            onPresetChange((current) => ({ ...current, aspectRatio: value as RenderPreset['aspectRatio'] }))
+          }
+        />
+      </div>
+      <div className="planner-block">
+        <span>Quality</span>
+        <SegmentedControl
+          options={['720p', '1080p']}
+          value={preset.resolution}
+          onChange={(value) =>
+            onPresetChange((current) => ({ ...current, resolution: value as RenderPreset['resolution'] }))
+          }
+        />
+      </div>
+    </section>
+  )
+}
+
+function AvatarLibraryControls({
+  preset,
+  avatarSelections,
+  avatarSlotFiles,
+  campaignAvatars,
+  onAvatarChange,
+  onAvatarFile,
+}: {
+  preset: RenderPreset
+  avatarSelections: string[]
+  avatarSlotFiles: Array<{ name: string; path: string; preview: string | null }>
+  campaignAvatars: AvatarRecipe[]
+  onAvatarChange: (slot: number, avatarId: string) => void
+  onAvatarFile: (slot: number, files: FileList | null) => void
+}) {
+  return (
+    <section className="rail-panel avatar-library-controls" aria-label="Avatar library">
       <div className="planner-block avatar-slots">
         <span>Avatar library</span>
         {[0, 1, 2].slice(0, preset.generationCount).map((slot) => (
@@ -955,23 +1055,6 @@ function GenerationPlanner({
             </label>
           </div>
         ))}
-      </div>
-      <div className="planner-block">
-        <span>Captions</span>
-        <select
-          value={preset.captionStyle}
-          onChange={(event) =>
-            onPresetChange((current) => ({ ...current, captionStyle: event.target.value as RenderPreset['captionStyle'] }))
-          }
-        >
-          <option value="none">No burned captions</option>
-          {captionStyles.map((style) => (
-            <option key={style.id} value={style.id}>
-              {style.name}
-            </option>
-          ))}
-        </select>
-        <small>{captionStyles.find((style) => style.id === preset.captionStyle)?.burnInRole ?? 'Export a clean render only.'}</small>
       </div>
     </section>
   )
@@ -1008,7 +1091,7 @@ function UploadCard({
     <article className={`upload-card ${accent}`}>
       <div className="card-icon">{icon}</div>
       <h2>{title}</h2>
-      <p>{subtitle}</p>
+      {subtitle ? <p>{subtitle}</p> : null}
       <label className={preview ? 'drop-zone has-preview' : 'drop-zone'}>
         <input type="file" accept={accept} onChange={(event) => onFile(event.target.files)} />
         {preview ? (
@@ -1534,8 +1617,8 @@ function SourceInsight({
       <section className="source-insight pending" aria-live="polite">
         <RefreshCw size={18} className="spinning" />
         <div>
-          <strong>Fetching the source post</strong>
-          <span>CopyTok is checking the post, captions, audio track, timing, and adapter readiness.</span>
+          <strong>Fetching source</strong>
+          <span>Post, captions, audio, timing.</span>
         </div>
       </section>
     )
@@ -1546,8 +1629,8 @@ function SourceInsight({
       <section className="source-insight pending" aria-live="polite">
         <RefreshCw size={18} className="spinning" />
         <div>
-          <strong>Preparing source video</strong>
-          <span>CopyTok is downloading, clipping, normalizing, extracting audio, and building the provider handoff.</span>
+          <strong>Preparing source</strong>
+          <span>Download, normalize, handoff.</span>
         </div>
       </section>
     )
@@ -1558,7 +1641,7 @@ function SourceInsight({
       <section className="source-insight warning" aria-live="polite">
         <CircleAlert size={18} />
         <div>
-          <strong>Source link could not be analyzed</strong>
+          <strong>Source failed</strong>
           <span>{analysis.message || analysis.installHint || 'Try another permitted post URL.'}</span>
         </div>
       </section>
@@ -1570,8 +1653,8 @@ function SourceInsight({
       <section className="source-insight neutral" aria-live="polite">
         <Link size={18} />
         <div>
-          <strong>Analyze the pasted source link</strong>
-          <span>Fetching is required before a URL can become a render-ready action template.</span>
+          <strong>Analyze link</strong>
+          <span>Required before URL render.</span>
         </div>
       </section>
     )
@@ -1632,55 +1715,8 @@ function SourceInsight({
           </button>
         )}
       </div>
-      <p>
-        {preparedSource && !preparedSource.ok
-          ? `Preparation failed: ${preparedSource.notes?.[0] ?? 'Try a different permitted source link.'}`
-          : preparedSource?.ok
-          ? `Prepared ${preparedDuration || 'short-form'} source for fal/PixVerse adapter packets.`
-          : 'Use only owned, licensed, or explicitly permitted posts. Reusing a real voice requires separate consent.'}
-      </p>
-    </section>
-  )
-}
-
-function EngineStackPanel({
-  capabilities,
-  renderPacket,
-}: {
-  capabilities: EngineCapabilities | null
-  renderPacket: RenderPacket | null
-}) {
-  const visibleTools = capabilities?.tools.filter((tool) =>
-    ['ytDlp', 'ffmpeg', 'ffprobe', 'whisperCli'].includes(tool.id),
-  )
-
-  return (
-    <section className="engine-strip" aria-label="Engine harness">
-      <div>
-        <span>Engine harness</span>
-        <strong>{capabilities?.ready ? 'Local ingest stack ready' : 'Checking local ingest stack'}</strong>
-      </div>
-      <div className="engine-tools">
-        {(visibleTools ?? []).map((tool) => (
-          <span key={tool.id} className={tool.status === 'ready' ? 'ready' : 'missing'} title={tool.role}>
-            {tool.status === 'ready' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}
-            {tool.label}
-          </span>
-        ))}
-      </div>
-      <div className="packet-pill">
-        {renderPacket ? (
-          <>
-            <CheckCircle2 size={15} />
-            Packet {renderPacket.id}
-          </>
-        ) : (
-          <>
-            <Sparkles size={15} />
-            fal/PixVerse packet slot
-          </>
-        )}
-      </div>
+      {preparedSource && !preparedSource.ok ? <p>Preparation failed: {preparedSource.notes?.[0] ?? 'Try another link.'}</p> : null}
+      {preparedSource?.ok ? <p>Prepared {preparedDuration || 'short-form'} source.</p> : null}
     </section>
   )
 }

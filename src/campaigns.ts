@@ -89,7 +89,7 @@ export const campaignRecipes: CampaignRecipe[] = [
     id: 'snapglp',
     name: 'SnapGLP',
     shortName: 'GLP',
-    accent: '#0ba8a2',
+    accent: '#5C7282',
     repoPath: '/Volumes/Adventure/Andromeda Labs/GLP1',
     marketingRoot: `${marketingRoot}/SnapGLP`,
     assetRoots: [
@@ -147,7 +147,7 @@ export const campaignRecipes: CampaignRecipe[] = [
     id: 'toneclone',
     name: 'Tone Clone',
     shortName: 'Tone',
-    accent: '#a7f05d',
+    accent: '#D7AE56',
     repoPath: '/Volumes/Adventure/Andromeda Labs/Tone Clone',
     marketingRoot: `${marketingRoot}/Tone Clone`,
     assetRoots: [
