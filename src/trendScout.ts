@@ -165,7 +165,7 @@ export const trendAppProfiles: TrendAppProfile[] = [
     name: 'ToneClone',
     shortName: 'Tone',
     category: 'Guitar tone matching',
-    accent: '#D7AE56',
+    accent: '#5C7282',
     description: 'Guitarists, amp tone, pedals, bedroom recording, plugin comparison, and riff reaction UGC.',
     defaultQuery: 'guitar tone app amp simulator pedalboard home recording TikTok',
     seedQueries: [

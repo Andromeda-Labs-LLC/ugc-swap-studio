@@ -147,7 +147,7 @@ export const campaignRecipes: CampaignRecipe[] = [
     id: 'toneclone',
     name: 'Tone Clone',
     shortName: 'Tone',
-    accent: '#D7AE56',
+    accent: '#5C7282',
     repoPath: '/Volumes/Adventure/Andromeda Labs/Tone Clone',
     marketingRoot: `${marketingRoot}/Tone Clone`,
     assetRoots: [

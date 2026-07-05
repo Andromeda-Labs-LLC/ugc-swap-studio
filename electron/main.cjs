@@ -18,9 +18,9 @@ const isDev = !app.isPackaged;
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,
-    height: 930,
+    height: 1040,
     minWidth: 1120,
-    minHeight: 760,
+    minHeight: 860,
     title: 'CopyTok',
     backgroundColor: '#fbfbfa',
     titleBarStyle: 'hiddenInset',
