@@ -188,7 +188,7 @@ h1 {
 }
 
 .left-rail .format-picker {
-  background: #5C7282;
+  background: #E0CD92;
 }
 
 .left-rail .batch-caption-controls {
@@ -203,18 +203,21 @@ h1 {
 }
 
 .right-rail .output-controls {
-  background: #5C7282;
+  background: #E0CD92;
 }
 
 .right-rail .avatar-library-controls {
   background: #DCD8CF;
 }
 
+.left-rail .batch-caption-controls .planner-block > span {
+  color: #EEECE0;
+}
+
 .left-rail .format-picker .compact-field > span,
 .left-rail .format-picker .trend-preset-card strong,
-.left-rail .batch-caption-controls .planner-block > span,
 .right-rail .output-controls .planner-block > span {
-  color: #EEECE0;
+  color: #5C7282;
 }
 
 .compact-field,
