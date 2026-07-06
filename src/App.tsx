@@ -17,7 +17,6 @@ import {
   HeartPulse,
   Image,
   Link,
-  List,
   Mic2,
   MousePointerClick,
   Play,
@@ -68,6 +67,25 @@ import {
   type TrendPreset,
 } from './campaigns'
 import {
+  buildWeek,
+  createDefaultDrafts,
+  dayKey,
+  formatScheduleTime,
+  getSocialPlatform,
+  jobToLaunchAsset,
+  mergeLaunchAssets,
+  nextLocalSlot,
+  socialPlatforms,
+  starterScheduledPosts,
+  validatePlatformDraft,
+  type LaunchAsset,
+  type LaunchMediaType,
+  type PlatformDrafts,
+  type ScheduledPost,
+  type SocialPlatform,
+  type SocialPlatformId,
+} from './launch'
+import {
   engagementPercent,
   formatMetric,
   getTrendAppProfile,
@@ -103,9 +121,10 @@ const defaultCompliance: ComplianceState = {
 }
 
 const navItems = [
-  { label: 'Projects', icon: FolderKanban },
+  { label: 'Workshop', icon: FolderKanban },
   { label: 'Trend Scout', icon: Search },
-  { label: 'Queue', icon: List },
+  { label: 'Launch', icon: Clock3 },
+  { label: 'Analytics', icon: BarChart3 },
   { label: 'Settings', icon: Settings },
 ]
 
@@ -131,8 +150,38 @@ function storedAppearanceMode(): AppearanceMode {
   }
 }
 
+function loadScheduledPosts() {
+  try {
+    const stored = window.localStorage.getItem('copytok-launch-schedule')
+    if (!stored) return starterScheduledPosts
+    const parsed = JSON.parse(stored)
+    return Array.isArray(parsed) ? (parsed as ScheduledPost[]) : starterScheduledPosts
+  } catch {
+    return starterScheduledPosts
+  }
+}
+
+function inputDateTimeFromIso(iso: string) {
+  const date = new Date(iso)
+  const offset = date.getTimezoneOffset() * 60000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+}
+
+function isoFromInputDateTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? nextLocalSlot(1, 9) : date.toISOString()
+}
+
+function readableAssetFallback(assetId: string) {
+  return assetId
+    .replace(/^job-asset-/, '')
+    .replace(/^asset-/, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 function App() {
-  const [activeNav, setActiveNav] = useState('Projects')
+  const [activeNav, setActiveNav] = useState('Workshop')
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(storedAppearanceMode)
   const [systemPrefersDark, setSystemPrefersDark] = useState(false)
   const [providerId, setProviderId] = useState<ProviderId>('fal-seedance-reference')
@@ -181,6 +230,19 @@ function App() {
   const [trendBrief, setTrendBrief] = useState<TrendAdaptationBrief | null>(null)
   const [isTrendLoading, setIsTrendLoading] = useState(false)
   const [trendError, setTrendError] = useState('')
+  const [selectedLaunchAssetId, setSelectedLaunchAssetId] = useState('')
+  const [selectedLaunchPlatformId, setSelectedLaunchPlatformId] = useState<SocialPlatformId>('tiktok')
+  const [launchDrafts, setLaunchDrafts] = useState<PlatformDrafts>(createDefaultDrafts)
+  const [launchMediaTypes, setLaunchMediaTypes] = useState<Record<SocialPlatformId, LaunchMediaType>>({
+    tiktok: 'video',
+    instagram: 'video',
+    facebook: 'video',
+    youtube: 'video',
+  })
+  const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>(loadScheduledPosts)
+  const [launchScheduleAt, setLaunchScheduleAt] = useState(inputDateTimeFromIso(nextLocalSlot(1, 9)))
+  const [launchCadenceHours, setLaunchCadenceHours] = useState(6)
+  const [bulkPlatformIds, setBulkPlatformIds] = useState<SocialPlatformId[]>(['tiktok', 'instagram', 'youtube'])
 
   useEffect(() => {
     try {
@@ -212,6 +274,14 @@ function App() {
 
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('copytok-launch-schedule', JSON.stringify(scheduledPosts))
+    } catch {
+      // Local schedule persistence is a convenience, not a rendering dependency.
+    }
+  }, [scheduledPosts])
 
   const selectedCampaign = useMemo(() => getCampaignRecipe(campaignId), [campaignId])
   const selectedFormat = useMemo(() => getFormatCategory(formatCategoryId), [formatCategoryId])
@@ -250,6 +320,24 @@ function App() {
   )
   const selectedTrendPost =
     sortedTrendPosts.find((post) => post.id === selectedTrendPostId) ?? sortedTrendPosts[0] ?? null
+  const launchAssets = useMemo(
+    () => mergeLaunchAssets(jobs.filter((job) => job.status === 'complete').map(jobToLaunchAsset)),
+    [jobs],
+  )
+  const selectedLaunchAsset =
+    launchAssets.find((asset) => asset.id === selectedLaunchAssetId) ?? launchAssets[0] ?? null
+  const selectedLaunchPlatform = getSocialPlatform(selectedLaunchPlatformId)
+  const selectedLaunchDraft = launchDrafts[selectedLaunchPlatformId]
+  const selectedLaunchMediaType = launchMediaTypes[selectedLaunchPlatformId]
+  const selectedLaunchEffectiveDraft = selectedLaunchAsset
+    ? launchFieldsForAsset(selectedLaunchPlatform, selectedLaunchAsset, selectedLaunchDraft)
+    : selectedLaunchDraft
+
+  useEffect(() => {
+    if (!selectedLaunchAssetId && launchAssets[0]) {
+      setSelectedLaunchAssetId(launchAssets[0].id)
+    }
+  }, [launchAssets, selectedLaunchAssetId])
 
   function handleCampaignChange(nextCampaignId: CampaignAppId) {
     const recipe = getCampaignRecipe(nextCampaignId)
@@ -378,7 +466,112 @@ function App() {
     setPreparedSource(null)
     setProviderResult(null)
     setRenderError('')
-    setActiveNav('Projects')
+    setActiveNav('Workshop')
+  }
+
+  function launchFieldsForAsset(
+    platform: SocialPlatform,
+    asset: LaunchAsset,
+    draft: Record<string, string | boolean>,
+  ) {
+    const campaign = getCampaignRecipe(asset.appId)
+    const fields = { ...draft }
+    const fallbackCaption = `${asset.title}. ${campaign.approvedCtas[0]}`
+    if (platform.id === 'tiktok' && !String(fields.caption ?? '').trim()) {
+      fields.caption = `${fallbackCaption} #${campaign.shortName.toLowerCase()} #ugc`
+    }
+    if (platform.id === 'instagram' && !String(fields.caption ?? '').trim()) {
+      fields.caption = fallbackCaption
+      fields.hashtags = fields.hashtags || `#${campaign.shortName.toLowerCase()} #reels #ugc`
+    }
+    if (platform.id === 'facebook' && !String(fields.message ?? '').trim()) {
+      fields.message = fallbackCaption
+    }
+    if (platform.id === 'youtube') {
+      if (!String(fields.title ?? '').trim()) fields.title = asset.title.slice(0, 100)
+      if (!String(fields.description ?? '').trim()) fields.description = `${fallbackCaption}\n\n#Shorts`
+    }
+    return fields
+  }
+
+  function updateLaunchDraft(platformId: SocialPlatformId, fieldId: string, value: string | boolean) {
+    setLaunchDrafts((current) => ({
+      ...current,
+      [platformId]: {
+        ...current[platformId],
+        [fieldId]: value,
+      },
+    }))
+  }
+
+  function scheduleSelectedPost() {
+    if (!selectedLaunchAsset) return
+    const platform = selectedLaunchPlatform
+    const fields = launchFieldsForAsset(platform, selectedLaunchAsset, selectedLaunchDraft)
+    const validation = validatePlatformDraft(platform, fields)
+    if (!validation.ok) return
+    const post: ScheduledPost = {
+      id: `post-${Date.now().toString(36)}`,
+      assetId: selectedLaunchAsset.id,
+      assetTitle: selectedLaunchAsset.title,
+      assetFormat: selectedLaunchAsset.format,
+      appId: selectedLaunchAsset.appId,
+      platformId: platform.id,
+      mediaType: selectedLaunchMediaType,
+      scheduledAt: isoFromInputDateTime(launchScheduleAt),
+      status: 'scheduled',
+      fields,
+      createdAt: new Date().toISOString(),
+    }
+    setScheduledPosts((current) => [...current, post].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)))
+  }
+
+  function scheduleBulkWeek() {
+    if (!launchAssets.length || !bulkPlatformIds.length) return
+    const start = new Date(isoFromInputDateTime(launchScheduleAt))
+    const posts: ScheduledPost[] = []
+    let cursor = start.getTime()
+    for (const asset of launchAssets.filter((item) => item.status === 'ready')) {
+      for (const platformId of bulkPlatformIds) {
+        const platform = getSocialPlatform(platformId)
+        const fields = launchFieldsForAsset(platform, asset, launchDrafts[platformId])
+        if (!validatePlatformDraft(platform, fields).ok) continue
+        posts.push({
+          id: `post-${asset.id}-${platformId}-${cursor}`,
+          assetId: asset.id,
+          assetTitle: asset.title,
+          assetFormat: asset.format,
+          appId: asset.appId,
+          platformId,
+          mediaType: launchMediaTypes[platformId],
+          scheduledAt: new Date(cursor).toISOString(),
+          status: 'scheduled',
+          fields,
+          createdAt: new Date().toISOString(),
+        })
+        cursor += launchCadenceHours * 60 * 60 * 1000
+      }
+    }
+    setScheduledPosts((current) => [...current, ...posts].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)))
+  }
+
+  function toggleBulkPlatform(platformId: SocialPlatformId) {
+    setBulkPlatformIds((current) =>
+      current.includes(platformId)
+        ? current.filter((item) => item !== platformId)
+        : [...current, platformId],
+    )
+  }
+
+  function updateLaunchMediaType(platformId: SocialPlatformId, mediaType: LaunchMediaType) {
+    setLaunchMediaTypes((current) => ({
+      ...current,
+      [platformId]: mediaType,
+    }))
+  }
+
+  function clearScheduledPost(postId: string) {
+    setScheduledPosts((current) => current.filter((post) => post.id !== postId))
   }
 
   function desktopFilePath(file: File) {
@@ -674,6 +867,36 @@ function App() {
           />
         ) : activeNav === 'Settings' ? (
           <SettingsPanel appearanceMode={appearanceMode} onAppearanceChange={setAppearanceMode} />
+        ) : activeNav === 'Launch' ? (
+          <LaunchWorkspace
+            assets={launchAssets}
+            selectedAsset={selectedLaunchAsset}
+            selectedAssetId={selectedLaunchAssetId}
+            selectedPlatform={selectedLaunchPlatform}
+            selectedPlatformId={selectedLaunchPlatformId}
+            selectedMediaType={selectedLaunchMediaType}
+            draft={selectedLaunchDraft}
+            effectiveDraft={selectedLaunchEffectiveDraft}
+            scheduledPosts={scheduledPosts}
+            scheduleAt={launchScheduleAt}
+            cadenceHours={launchCadenceHours}
+            bulkPlatformIds={bulkPlatformIds}
+            onSelectAsset={setSelectedLaunchAssetId}
+            onSelectPlatform={setSelectedLaunchPlatformId}
+            onMediaTypeChange={updateLaunchMediaType}
+            onDraftChange={updateLaunchDraft}
+            onScheduleAtChange={setLaunchScheduleAt}
+            onCadenceChange={setLaunchCadenceHours}
+            onScheduleSelected={scheduleSelectedPost}
+            onScheduleBulk={scheduleBulkWeek}
+            onToggleBulkPlatform={toggleBulkPlatform}
+            onClearPost={clearScheduledPost}
+          />
+        ) : activeNav === 'Analytics' ? (
+          <AnalyticsWorkspace
+            assets={launchAssets}
+            scheduledPosts={scheduledPosts}
+          />
         ) : (
           <>
             <h1>CopyTok</h1>
@@ -1175,6 +1398,426 @@ function ProviderChips({
         })}
       </div>
     </div>
+  )
+}
+
+function LaunchWorkspace({
+  assets,
+  selectedAsset,
+  selectedAssetId,
+  selectedPlatform,
+  selectedPlatformId,
+  selectedMediaType,
+  draft,
+  effectiveDraft,
+  scheduledPosts,
+  scheduleAt,
+  cadenceHours,
+  bulkPlatformIds,
+  onSelectAsset,
+  onSelectPlatform,
+  onMediaTypeChange,
+  onDraftChange,
+  onScheduleAtChange,
+  onCadenceChange,
+  onScheduleSelected,
+  onScheduleBulk,
+  onToggleBulkPlatform,
+  onClearPost,
+}: {
+  assets: LaunchAsset[]
+  selectedAsset: LaunchAsset | null
+  selectedAssetId: string
+  selectedPlatform: SocialPlatform
+  selectedPlatformId: SocialPlatformId
+  selectedMediaType: LaunchMediaType
+  draft: Record<string, string | boolean>
+  effectiveDraft: Record<string, string | boolean>
+  scheduledPosts: ScheduledPost[]
+  scheduleAt: string
+  cadenceHours: number
+  bulkPlatformIds: SocialPlatformId[]
+  onSelectAsset: (assetId: string) => void
+  onSelectPlatform: (platformId: SocialPlatformId) => void
+  onMediaTypeChange: (platformId: SocialPlatformId, mediaType: LaunchMediaType) => void
+  onDraftChange: (platformId: SocialPlatformId, fieldId: string, value: string | boolean) => void
+  onScheduleAtChange: (value: string) => void
+  onCadenceChange: (hours: number) => void
+  onScheduleSelected: () => void
+  onScheduleBulk: () => void
+  onToggleBulkPlatform: (platformId: SocialPlatformId) => void
+  onClearPost: (postId: string) => void
+}) {
+  const validation = validatePlatformDraft(selectedPlatform, effectiveDraft)
+  const week = buildWeek()
+  const readyAssets = assets.filter((asset) => asset.status === 'ready')
+
+  return (
+    <>
+      <h1>Launch</h1>
+      <section className="launch-console" aria-label="Launch planner">
+        <aside className="launch-panel launch-ready">
+          <div className="launch-panel-heading">
+            <span>Ready</span>
+            <strong>{readyAssets.length} assets</strong>
+          </div>
+          <div className="launch-asset-list">
+            {readyAssets.map((asset) => (
+              <button
+                key={asset.id}
+                className={selectedAssetId === asset.id ? 'launch-asset selected' : 'launch-asset'}
+                type="button"
+                onClick={() => onSelectAsset(asset.id)}
+              >
+                <span className="asset-thumb">
+                  {campaignIcons[asset.appId] ? <img src={campaignIcons[asset.appId]} alt="" /> : <Play size={20} />}
+                </span>
+                <span>
+                  <strong>{asset.title}</strong>
+                  <small>{asset.format} - {asset.durationSeconds}s - {asset.aspectRatio}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="bulk-scheduler">
+            <span>Bulk schedule</span>
+            <label>
+              Start
+              <input type="datetime-local" value={scheduleAt} onChange={(event) => onScheduleAtChange(event.target.value)} />
+            </label>
+            <label>
+              Cadence
+              <select value={cadenceHours} onChange={(event) => onCadenceChange(Number(event.target.value))}>
+                <option value={3}>Every 3 hours</option>
+                <option value={4}>Every 4 hours</option>
+                <option value={6}>Every 6 hours</option>
+                <option value={12}>Twice daily</option>
+                <option value={24}>Daily</option>
+              </select>
+            </label>
+            <div className="bulk-platforms">
+              {socialPlatforms.map((platform) => (
+                <button
+                  key={platform.id}
+                  className={bulkPlatformIds.includes(platform.id) ? 'selected' : ''}
+                  type="button"
+                  onClick={() => onToggleBulkPlatform(platform.id)}
+                >
+                  {platform.shortName}
+                </button>
+              ))}
+            </div>
+            <button className="launch-primary small" type="button" onClick={onScheduleBulk} disabled={!readyAssets.length || !bulkPlatformIds.length}>
+              Auto-fill week
+            </button>
+          </div>
+        </aside>
+
+        <LaunchCalendar
+          week={week}
+          assets={assets}
+          scheduledPosts={scheduledPosts}
+          onClearPost={onClearPost}
+        />
+
+        <PlatformComposer
+          asset={selectedAsset}
+          platform={selectedPlatform}
+          platformId={selectedPlatformId}
+          selectedMediaType={selectedMediaType}
+          draft={draft}
+          effectiveDraft={effectiveDraft}
+          validation={validation}
+          scheduleAt={scheduleAt}
+          onSelectPlatform={onSelectPlatform}
+          onMediaTypeChange={onMediaTypeChange}
+          onDraftChange={onDraftChange}
+          onScheduleAtChange={onScheduleAtChange}
+          onScheduleSelected={onScheduleSelected}
+        />
+      </section>
+    </>
+  )
+}
+
+function LaunchCalendar({
+  week,
+  assets,
+  scheduledPosts,
+  onClearPost,
+}: {
+  week: Date[]
+  assets: LaunchAsset[]
+  scheduledPosts: ScheduledPost[]
+  onClearPost: (postId: string) => void
+}) {
+  const assetMap = new Map(assets.map((asset) => [asset.id, asset]))
+  return (
+    <section className="launch-panel launch-calendar" aria-label="Calendar">
+      <div className="launch-panel-heading">
+        <span>Calendar</span>
+        <strong>{scheduledPosts.length} scheduled</strong>
+      </div>
+      <div className="calendar-grid">
+        {week.map((day) => {
+          const posts = scheduledPosts.filter((post) => dayKey(new Date(post.scheduledAt)) === dayKey(day))
+          return (
+            <article className="calendar-day" key={dayKey(day)}>
+              <div className="calendar-day-head">
+                <span>{new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(day)}</span>
+                <strong>{day.getDate()}</strong>
+              </div>
+              <div className="calendar-posts">
+                {posts.length ? posts.map((post) => {
+                  const asset = assetMap.get(post.assetId)
+                  const platform = getSocialPlatform(post.platformId)
+                  const postTitle = asset?.title ?? post.assetTitle ?? readableAssetFallback(post.assetId)
+                  return (
+                    <div className="calendar-post" key={post.id} style={{ ['--platform-color' as string]: platform.color }}>
+                      <span>{formatScheduleTime(post.scheduledAt)}</span>
+                      <strong>{platform.shortName}</strong>
+                      <small>{postTitle}</small>
+                      <button type="button" onClick={() => onClearPost(post.id)} aria-label="Remove scheduled post">
+                        x
+                      </button>
+                    </div>
+                  )
+                }) : (
+                  <span className="empty-day">Open</span>
+                )}
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function PlatformComposer({
+  asset,
+  platform,
+  platformId,
+  selectedMediaType,
+  draft,
+  effectiveDraft,
+  validation,
+  scheduleAt,
+  onSelectPlatform,
+  onMediaTypeChange,
+  onDraftChange,
+  onScheduleAtChange,
+  onScheduleSelected,
+}: {
+  asset: LaunchAsset | null
+  platform: SocialPlatform
+  platformId: SocialPlatformId
+  selectedMediaType: LaunchMediaType
+  draft: Record<string, string | boolean>
+  effectiveDraft: Record<string, string | boolean>
+  validation: ReturnType<typeof validatePlatformDraft>
+  scheduleAt: string
+  onSelectPlatform: (platformId: SocialPlatformId) => void
+  onMediaTypeChange: (platformId: SocialPlatformId, mediaType: LaunchMediaType) => void
+  onDraftChange: (platformId: SocialPlatformId, fieldId: string, value: string | boolean) => void
+  onScheduleAtChange: (value: string) => void
+  onScheduleSelected: () => void
+}) {
+  return (
+    <aside className="launch-panel platform-composer" aria-label="Platform composer">
+      <div className="launch-panel-heading">
+        <span>Platform</span>
+        <strong>{platform.name}</strong>
+      </div>
+      <div className="platform-switcher">
+        {socialPlatforms.map((item) => (
+          <button
+            key={item.id}
+            className={platformId === item.id ? 'selected' : ''}
+            type="button"
+            onClick={() => onSelectPlatform(item.id)}
+          >
+            {item.shortName}
+          </button>
+        ))}
+      </div>
+
+      <div className="media-type-row">
+        {platform.supportsMedia.map((mediaType) => (
+          <button
+            key={mediaType}
+            className={selectedMediaType === mediaType ? 'selected' : ''}
+            type="button"
+            onClick={() => onMediaTypeChange(platform.id, mediaType)}
+          >
+            {mediaType}
+          </button>
+        ))}
+      </div>
+
+      <label className="launch-time-field">
+        Schedule
+        <input type="datetime-local" value={scheduleAt} onChange={(event) => onScheduleAtChange(event.target.value)} />
+      </label>
+
+      <div className="dynamic-fields">
+        {platform.fields.map((field) => (
+          <DynamicLaunchField
+            key={field.id}
+            field={field}
+            value={draft[field.id]}
+            onChange={(value) => onDraftChange(platform.id, field.id, value)}
+          />
+        ))}
+      </div>
+
+      <PlatformPreview platform={platform} asset={asset} fields={effectiveDraft} />
+
+      <div className="platform-rules">
+        {platform.constraints.map((constraint) => (
+          <span key={constraint}>{constraint}</span>
+        ))}
+      </div>
+
+      {validation.blockers.length ? (
+        <div className="launch-validation blocked">
+          {validation.blockers.map((blocker) => <span key={blocker}>{blocker}</span>)}
+        </div>
+      ) : null}
+      {validation.warnings.length ? (
+        <div className="launch-validation">
+          {validation.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+        </div>
+      ) : null}
+
+      <button className="launch-primary" type="button" disabled={!asset || !validation.ok} onClick={onScheduleSelected}>
+        Schedule selected
+      </button>
+    </aside>
+  )
+}
+
+function DynamicLaunchField({
+  field,
+  value,
+  onChange,
+}: {
+  field: SocialPlatform['fields'][number]
+  value: string | boolean | undefined
+  onChange: (value: string | boolean) => void
+}) {
+  const textValue = typeof value === 'string' ? value : ''
+  const overLimit = Boolean(field.maxLength && textValue.length > field.maxLength)
+  if (field.type === 'toggle') {
+    return (
+      <label className="dynamic-toggle">
+        <span>{field.label}</span>
+        <input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />
+      </label>
+    )
+  }
+  if (field.type === 'select') {
+    return (
+      <label className="dynamic-field">
+        <span>{field.label}</span>
+        <select value={textValue} onChange={(event) => onChange(event.target.value)}>
+          {(field.options ?? []).map((option) => (
+            <option key={option.id} value={option.id}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+    )
+  }
+  return (
+    <label className="dynamic-field">
+      <span>
+        {field.label}
+        {field.required ? <small>Required</small> : null}
+      </span>
+      {field.type === 'textarea' ? (
+        <textarea
+          value={textValue}
+          maxLength={field.maxLength ? field.maxLength + 200 : undefined}
+          placeholder={field.placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <input
+          value={textValue}
+          maxLength={field.maxLength ? field.maxLength + 200 : undefined}
+          placeholder={field.placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+      {field.maxLength ? (
+        <em className={overLimit ? 'over' : ''}>{textValue.length}/{field.maxLength}</em>
+      ) : null}
+    </label>
+  )
+}
+
+function PlatformPreview({
+  platform,
+  asset,
+  fields,
+}: {
+  platform: SocialPlatform
+  asset: LaunchAsset | null
+  fields: Record<string, string | boolean>
+}) {
+  const primaryCopy = String(fields.caption ?? fields.message ?? fields.description ?? '')
+  const title = String(fields.title ?? fields.coverText ?? asset?.title ?? 'Ready asset')
+  return (
+    <div className="platform-preview" style={{ ['--platform-color' as string]: platform.color }}>
+      <span>{platform.shortName} preview</span>
+      <strong>{title || asset?.title || 'Untitled'}</strong>
+      <p>{primaryCopy || 'Copy will auto-fill from the selected app recipe when scheduled.'}</p>
+      {asset ? <small>{asset.title} - {asset.durationSeconds}s - {asset.aspectRatio}</small> : <small>Select an asset first.</small>}
+    </div>
+  )
+}
+
+function AnalyticsWorkspace({
+  assets,
+  scheduledPosts,
+}: {
+  assets: LaunchAsset[]
+  scheduledPosts: ScheduledPost[]
+}) {
+  const scheduled = scheduledPosts.filter((post) => post.status === 'scheduled').length
+  const byPlatform = socialPlatforms.map((platform) => ({
+    platform,
+    count: scheduledPosts.filter((post) => post.platformId === platform.id).length,
+  }))
+  const readyAssets = assets.filter((asset) => asset.status === 'ready').length
+
+  return (
+    <>
+      <h1>Analytics</h1>
+      <section className="analytics-console" aria-label="Launch analytics">
+        <div className="analytics-card">
+          <span>Ready assets</span>
+          <strong>{readyAssets}</strong>
+        </div>
+        <div className="analytics-card">
+          <span>Scheduled posts</span>
+          <strong>{scheduled}</strong>
+        </div>
+        <div className="analytics-card">
+          <span>Platforms</span>
+          <strong>{byPlatform.filter((item) => item.count > 0).length}</strong>
+        </div>
+        <div className="platform-breakdown">
+          {byPlatform.map(({ platform, count }) => (
+            <div key={platform.id} style={{ ['--platform-color' as string]: platform.color }}>
+              <span>{platform.shortName}</span>
+              <strong>{count}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
   )
 }
 
