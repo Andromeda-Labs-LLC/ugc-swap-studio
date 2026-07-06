@@ -121,10 +121,10 @@ const defaultCompliance: ComplianceState = {
 }
 
 const navItems = [
-  { label: 'Workshop', icon: FolderKanban },
   { label: 'Trend Scout', icon: Search },
-  { label: 'Launch', icon: Clock3 },
+  { label: 'Workshop', icon: FolderKanban },
   { label: 'Analytics', icon: BarChart3 },
+  { label: 'Launch', icon: Clock3 },
   { label: 'Settings', icon: Settings },
 ]
 
@@ -181,7 +181,7 @@ function readableAssetFallback(assetId: string) {
 }
 
 function App() {
-  const [activeNav, setActiveNav] = useState('Workshop')
+  const [activeNav, setActiveNav] = useState('Trend Scout')
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(storedAppearanceMode)
   const [systemPrefersDark, setSystemPrefersDark] = useState(false)
   const [providerId, setProviderId] = useState<ProviderId>('fal-seedance-reference')
